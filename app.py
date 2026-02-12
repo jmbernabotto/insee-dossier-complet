@@ -9,10 +9,7 @@ import geopandas as gpd
 import re
 
 # Récupération de la clé API (Local ou Cloud)
-if "INSEE_API_KEY" in st.secrets:
-    API_KEY = st.secrets["INSEE_API_KEY"]
-else:
-    API_KEY = "dfc20306-246c-477c-8203-06246c977cba"
+API_KEY = st.secrets.get("INSEE_API_KEY", "dfc20306-246c-477c-8203-06246c977cba")
 
 st.set_page_config(page_title="INSEE Geo Finder", page_icon="🗺️", layout="wide")
 st.title("🗺️ Recherche & Cartographie INSEE")
@@ -43,42 +40,6 @@ def load_data(area_type):
         return df
     except Exception: return pd.DataFrame()
 
-@st.cache_data(show_spinner="Extraction des chiffres clés...")
-def get_key_metrics(area_type, code):
-    """Récupère les indicateurs clés via pynsee"""
-    try:
-        # Mapping des niveaux géographiques pour pynsee
-        nivgeo_map = {
-            "communes": "COM",
-            "EPCI": "EPCI",
-            "departements": "DEP",
-            "regions": "REG"
-        }
-        nivgeo = nivgeo_map.get(area_type)
-        if not nivgeo: return None
-
-        # On récupère les données de population et d'activité
-        # Dataset : GEO2023RP2020 (Recensement 2020 sur géo 2023)
-        data = pynsee.get_local_data(
-            variables=["POPULATION", "NB_ENTR_Secteur_A", "NB_ENTR_Secteur_B", "NB_ENTR_Secteur_C", "NB_ENTR_Secteur_D", "NB_ENTR_Secteur_E"],
-            nivgeo=nivgeo,
-            geocodes=[code]
-        )
-        
-        if data is not None and not data.empty:
-            # Extraction des valeurs
-            pop = data[data['VARIABLE'] == 'POPULATION']['OBS_VALUE'].values[0]
-            # Somme des entreprises
-            ent_vars = ["NB_ENTR_Secteur_A", "NB_ENTR_Secteur_B", "NB_ENTR_Secteur_C", "NB_ENTR_Secteur_D", "NB_ENTR_Secteur_E"]
-            ent = data[data['VARIABLE'].isin(ent_vars)]['OBS_VALUE'].astype(float).sum()
-            
-            return {
-                "population": int(float(pop)),
-                "entreprises": int(ent)
-            }
-    except: pass
-    return None
-
 @st.cache_data(show_spinner="Identification de l'EPCI...")
 def get_epci_from_commune(com_code):
     headers = {"Authorization": f"Bearer {API_KEY}", "Accept": "application/json"}
@@ -87,8 +48,7 @@ def get_epci_from_commune(com_code):
         r = requests.get(url, headers=headers)
         if r.status_code == 200:
             data = r.json()
-            if data:
-                return {'CODE': data[0]['code'], 'TITLE': data[0]['intitule']}
+            if data: return {'CODE': data[0]['code'], 'TITLE': data[0]['intitule']}
     except: pass
     return None
 
@@ -133,7 +93,7 @@ if not df_list.empty:
                 mask = df_list['TITLE'].str.contains(search_query, case=False, na=False) | df_list['CODE'].str.contains(search_query)
                 results = df_list[mask].head(100)
                 if not results.empty:
-                    sel_display = st.sidebar.selectbox("EPCI", results['DISPLAY_TITLE'].tolist())
+                    sel_display = st.sidebar.selectbox("Sélectionnez l'EPCI", results['DISPLAY_TITLE'].tolist())
                     row_sel = results[results['DISPLAY_TITLE'] == sel_display].iloc[0]
                     final_code, final_name = row_sel['CODE'], row_sel['TITLE']
             else:
@@ -141,11 +101,10 @@ if not df_list.empty:
                 mask_com = df_com['TITLE'].str.contains(search_query, case=False, na=False) | df_com['CODE'].str.contains(search_query)
                 com_results = df_com[mask_com].head(100)
                 if not com_results.empty:
-                    sel_com_display = st.sidebar.selectbox("Commune", com_results['DISPLAY_TITLE'].tolist())
+                    sel_com_display = st.sidebar.selectbox("Sélectionnez la commune", com_results['DISPLAY_TITLE'].tolist())
                     com_code = com_results[com_results['DISPLAY_TITLE'] == sel_com_display].iloc[0]['CODE']
                     epci_info = get_epci_from_commune(com_code)
-                    if epci_info:
-                        final_code, final_name = epci_info['CODE'], epci_info['TITLE']
+                    if epci_info: final_code, final_name = epci_info['CODE'], epci_info['TITLE']
     else:
         search_query = st.sidebar.text_input("🔍 Rechercher", placeholder="Nom ou Code...")
         if search_query:
@@ -153,28 +112,23 @@ if not df_list.empty:
             mask = df_list.apply(lambda row: all(kw in row['norm_title'] for kw in normalize_text(search_query).split()) or search_query in str(row['CODE']), axis=1)
             results = df_list[mask].head(100)
             if not results.empty:
-                sel_display = st.sidebar.selectbox("Résultat", results['DISPLAY_TITLE'].tolist())
+                sel_display = st.sidebar.selectbox("Sélectionnez le résultat", results['DISPLAY_TITLE'].tolist())
                 row_sel = results[results['DISPLAY_TITLE'] == sel_display].iloc[0]
                 final_code, final_name = row_sel['CODE'], row_sel['TITLE']
 
     if final_code:
-        # Affichage des chiffres clés
-        metrics = get_key_metrics(area_key, final_code)
-        if metrics:
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Population totale", f"{metrics['population']:,}".replace(',', ' '))
-            m2.metric("Nombre d'entreprises", f"{metrics['entreprises']:,}".replace(',', ' '))
-            m3.metric("Niveau géo", area_key.upper())
-        
         col_info, col_map = st.columns([1, 3])
         with col_info:
             st.subheader(final_name)
-            prefixes = {"communes":"COM", "EPCI":"EPCI", "departements":"DEP", "regions":"REG", "airesDAttractionDesVilles2020":"AAV2020", "unitesUrbaines2020":"UU2020", "zonesDEmploi2020":"ZE2020", "bassinsDeVie2022":"BV2022"}
-            st.link_button("📄 Dossier Complet INSEE", f"https://www.insee.fr/fr/statistiques/2011101?geo={prefixes.get(area_key, 'COM')}-{final_code}", use_container_width=True, type="primary")
+            st.metric("Code", final_code)
+            prefix_map = {"communes": "COM", "EPCI": "EPCI", "departements": "DEP", "regions": "REG", "airesDAttractionDesVilles2020": "AAV2020", "unitesUrbaines2020": "UU2020", "zonesDEmploi2020": "ZE2020", "bassinsDeVie2022": "BV2022"}
+            st.link_button("📄 Dossier Complet INSEE", f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix_map.get(area_key, 'COM')}-{final_code}", use_container_width=True, type="primary")
+            
             gdf = get_geometry_robust(area_key, final_code, final_name)
             if gdf is not None:
                 st.success("✅ Contour chargé")
                 st.download_button("📥 GeoJSON", gdf.to_json(), f"{final_code}.geojson")
+            else: st.error("❌ Contour non trouvé")
 
         with col_map:
             if gdf is not None:
