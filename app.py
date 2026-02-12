@@ -1,63 +1,65 @@
 import streamlit as st
-import pynsee
 import pandas as pd
 import requests
 import unidecode
 import folium
 from streamlit_folium import folium_static
 import geopandas as gpd
-import re
+
+# Configuration
+st.set_page_config(page_title="Public-IA : Géo Finder", page_icon="🗺️", layout="wide")
 
 # Récupération de la clé API
 API_KEY = st.secrets.get("INSEE_API_KEY", "dfc20306-246c-477c-8203-06246c977cba")
 
-st.set_page_config(page_title="INSEE Geo Finder", page_icon="🗺️", layout="wide")
 st.title("🗺️ Recherche & Cartographie INSEE")
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner="Chargement des référentiels...")
 def load_data(area_type):
     headers = {"Authorization": f"Bearer {API_KEY}", "Accept": "application/json"}
     try:
-        if area_type == "EPCI":
-            url = "https://api.insee.fr/metadonnees/geo/intercommunalites"
-            resp = requests.get(url, headers=headers)
-            if resp.status_code == 200:
-                df = pd.DataFrame(resp.json())
-                df = df.rename(columns={'code': 'CODE', 'intituleComplet': 'TITLE'})
-                df['DISPLAY_TITLE'] = df['TITLE'] + " (" + df['CODE'] + ")"
-                return df
-        elif area_type == "communes":
-            url = "https://api.insee.fr/metadonnees/geo/communes"
-            resp = requests.get(url, headers=headers)
-            if resp.status_code == 200:
-                df = pd.DataFrame(resp.json())
-                df = df.rename(columns={'code': 'CODE', 'intitule': 'TITLE'})
-                df['DISPLAY_TITLE'] = df['TITLE'] + " (" + df['CODE'] + ")"
-                return df
-        df = pynsee.get_area_list(area_type)
-        if not df.empty:
+        # On utilise l'API de métadonnées directe (très léger en mémoire)
+        endpoints = {
+            "EPCI": "intercommunalites", 
+            "communes": "communes",
+            "departements": "departements", 
+            "regions": "regions",
+            "airesDAttractionDesVilles2020": "airesDAttractionDesVilles2020",
+            "unitesUrbaines2020": "unitesUrbaines2020",
+            "zonesDEmploi2020": "zonesDEmploi2020"
+        }
+        url = f"https://api.insee.fr/metadonnees/geo/{endpoints.get(area_type, area_type)}"
+        resp = requests.get(url, headers=headers)
+        if resp.status_code == 200:
+            df = pd.DataFrame(resp.json())
+            title_col = 'intituleComplet' if 'intituleComplet' in df.columns else 'intitule'
+            df = df.rename(columns={'code': 'CODE', title_col: 'TITLE'})
             df['DISPLAY_TITLE'] = df['TITLE'] + " (" + df['CODE'] + ")"
-        return df
-    except Exception: return pd.DataFrame()
+            return df[['CODE', 'TITLE', 'DISPLAY_TITLE']]
+    except: pass
+    return pd.DataFrame()
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner="Recherche de l'EPCI...")
 def get_epci_from_commune(com_code):
     headers = {"Authorization": f"Bearer {API_KEY}", "Accept": "application/json"}
     url = f"https://api.insee.fr/metadonnees/geo/commune/{com_code}/ascendants?type=Intercommunalite"
     try:
         r = requests.get(url, headers=headers)
-        if r.status_code == 200:
-            data = r.json()
-            if data: return {'CODE': data[0]['code'], 'TITLE': data[0]['intitule']}
+        if r.status_code == 200 and r.json():
+            return {'CODE': r.json()[0]['code'], 'TITLE': r.json()[0]['intitule']}
     except: pass
     return None
 
-def get_osm_geometry(name):
-    """Source de secours via OpenStreetMap"""
+@st.cache_data(show_spinner="Génération de la carte...")
+def get_geometry_osm(name, area_type):
+    """Source principale légère via Nominatim pour éviter les crashs mémoire"""
     try:
         clean_name = name.split('(')[0].strip()
-        url = f"https://nominatim.openstreetmap.org/search?q={clean_name}, France&format=geojson&polygon_geojson=1&limit=1"
-        resp = requests.get(url, headers={'User-Agent': 'InseeGeoApp-PublicIA'}, timeout=5)
+        query = f"{clean_name}, France"
+        if area_type == "EPCI": query = f"Intercommunalité {clean_name}, France"
+        
+        url = f"https://nominatim.openstreetmap.org/search?q={query}&format=geojson&polygon_geojson=1&limit=1"
+        resp = requests.get(url, headers={'User-Agent': 'PublicIA-GeoApp'}, timeout=10)
         if resp.status_code == 200 and resp.json()['features']:
             gdf = gpd.GeoDataFrame.from_features(resp.json()['features'])
             gdf.crs = "EPSG:4326"
@@ -65,30 +67,10 @@ def get_osm_geometry(name):
     except: pass
     return None
 
-@st.cache_data(show_spinner="Récupération du contour...")
-def get_geometry_robust(area_type, code, name):
-    # 1. Tentative IGN via pynsee
-    try:
-        geo_map = {"communes": "ADMINEXPRESS-COG-CARTO.LATEST:commune", "EPCI": "ADMINEXPRESS-COG-CARTO.LATEST:epci", "departements": "ADMINEXPRESS-COG-CARTO.LATEST:departement", "regions": "ADMINEXPRESS-COG-CARTO.LATEST:region"}
-        if area_type in geo_map:
-            gdf = pynsee.get_geodata(geo_map[area_type])
-            code_col = 'code_siren' if area_type == "EPCI" else 'code_insee'
-            if code_col not in gdf.columns:
-                for alt in ['code', 'insee_com']:
-                    if alt in gdf.columns: code_col = alt; break
-            gdf_filtered = gdf[gdf[code_col] == code]
-            if not gdf_filtered.empty: return gdf_filtered.to_crs("EPSG:4326")
-    except: pass
-    
-    # 2. Fallback OSM
-    return get_osm_geometry(name)
-
-def normalize_text(text):
-    return unidecode.unidecode(str(text)).lower()
-
+# --- Interface ---
 categories = {
     "Administratif": {"Communes": "communes", "Intercommunalités (EPCI)": "EPCI", "Départements": "departements", "Régions": "regions"},
-    "Zonages d'étude": {"Aires d'attraction (2020)": "airesDAttractionDesVilles2020", "Unités Urbaines (2020)": "unitesUrbaines2020", "Zones d'emploi (2020)": "zonesDEmploi2020", "Bassins de vie (2022)": "bassinsDeVie2022"}
+    "Zonages d'étude": {"Aires d'attraction (2020)": "airesDAttractionDesVilles2020", "Unités Urbaines (2020)": "unitesUrbaines2020", "Zones d'emploi (2020)": "zonesDEmploi2020"}
 }
 
 st.sidebar.title("🛠️ Paramètres")
@@ -108,29 +90,29 @@ if not df_list.empty:
         if search_query:
             if search_mode == "Nom de l'EPCI":
                 mask = df_list['TITLE'].str.contains(search_query, case=False, na=False) | df_list['CODE'].str.contains(search_query)
-                results = df_list[mask].head(100)
+                results = df_list[mask].head(50)
                 if not results.empty:
-                    sel_display = st.sidebar.selectbox("Sélectionnez l'EPCI", results['DISPLAY_TITLE'].tolist())
-                    row_sel = results[results['DISPLAY_TITLE'] == sel_display].iloc[0]
-                    final_code, final_name = row_sel['CODE'], row_sel['TITLE']
+                    sel = st.sidebar.selectbox("EPCI", results['DISPLAY_TITLE'].tolist())
+                    row = results[results['DISPLAY_TITLE'] == sel].iloc[0]
+                    final_code, final_name = row['CODE'], row['TITLE']
             else:
                 df_com = load_data("communes")
                 mask_com = df_com['TITLE'].str.contains(search_query, case=False, na=False) | df_com['CODE'].str.contains(search_query)
-                com_results = df_com[mask_com].head(100)
+                com_results = df_com[mask_com].head(50)
                 if not com_results.empty:
-                    sel_com_display = st.sidebar.selectbox("Sélectionnez la commune", com_results['DISPLAY_TITLE'].tolist())
-                    com_code = com_results[com_results['DISPLAY_TITLE'] == sel_com_display].iloc[0]['CODE']
-                    epci_info = get_epci_from_commune(com_code)
-                    if epci_info: final_code, final_name = epci_info['CODE'], epci_info['TITLE']
+                    sel_com = st.sidebar.selectbox("Commune", com_results['DISPLAY_TITLE'].tolist())
+                    com_code = com_results[com_results['DISPLAY_TITLE'] == sel_com].iloc[0]['CODE']
+                    epci = get_epci_from_commune(com_code)
+                    if epci: final_code, final_name = epci['CODE'], epci['TITLE']
     else:
         search_query = st.sidebar.text_input("🔍 Rechercher", placeholder="Nom ou Code...")
         if search_query:
-            mask = df_list.apply(lambda row: all(kw in normalize_text(row['TITLE']) for kw in normalize_text(search_query).split()) or search_query in str(row['CODE']), axis=1)
-            results = df_list[mask].head(100)
+            mask = df_list.apply(lambda row: all(kw in unidecode.unidecode(row['TITLE']).lower() for kw in unidecode.unidecode(search_query).lower().split()) or search_query in str(row['CODE']), axis=1)
+            results = df_list[mask].head(50)
             if not results.empty:
-                sel_display = st.sidebar.selectbox("Sélectionnez le résultat", results['DISPLAY_TITLE'].tolist())
-                row_sel = results[results['DISPLAY_TITLE'] == sel_display].iloc[0]
-                final_code, final_name = row_sel['CODE'], row_sel['TITLE']
+                sel = st.sidebar.selectbox("Résultat", results['DISPLAY_TITLE'].tolist())
+                row = results[results['DISPLAY_TITLE'] == sel].iloc[0]
+                final_code, final_name = row['CODE'], row['TITLE']
 
     if final_code:
         col_info, col_map = st.columns([1, 3])
@@ -138,25 +120,24 @@ if not df_list.empty:
             st.subheader(final_name)
             st.metric("Code", final_code)
             prefix_map = {"communes": "COM", "EPCI": "EPCI", "departements": "DEP", "regions": "REG", "airesDAttractionDesVilles2020": "AAV2020", "unitesUrbaines2020": "UU2020", "zonesDEmploi2020": "ZE2020", "bassinsDeVie2022": "BV2022"}
-            st.link_button("📄 Dossier Complet INSEE", f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix_map.get(area_key, 'COM')}-{final_code}", use_container_width=True, type="primary")
+            url = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix_map.get(area_key, 'COM')}-{final_code}"
+            st.link_button("📄 Dossier INSEE", url, use_container_width=True, type="primary")
             
-            gdf = get_geometry_robust(area_key, final_code, final_name)
+            gdf = get_geometry_osm(final_name, area_key)
             if gdf is not None:
-                st.success("✅ Contour chargé")
+                st.success("✅ Limites trouvées")
                 st.download_button("📥 GeoJSON", gdf.to_json(), f"{final_code}.geojson")
             else: st.warning("⚠️ Contour indisponible")
 
         with col_map:
             if gdf is not None:
-                try:
-                    centroid = gdf.geometry.centroid.iloc[0]
-                    m = folium.Map(location=[centroid.y, centroid.x], zoom_start=11, tiles=None)
-                    folium.TileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr='Esri', name='Satellite').add_to(m)
-                    folium.TileLayer('OpenStreetMap', name="Plan").add_to(m)
-                    folium.GeoJson(gdf, name="Limite", style_function=lambda x: {'fillColor': '#318ce7', 'color': 'black', 'weight': 2, 'fillOpacity': 0.3}).add_to(m)
-                    folium.LayerControl(collapsed=False).add_to(m)
-                    folium_static(m, width=1000, height=600)
-                except Exception as e:
-                    st.error(f"Erreur d'affichage carte : {e}")
+                centroid = gdf.geometry.centroid.iloc[0]
+                m = folium.Map(location=[centroid.y, centroid.x], zoom_start=11, tiles=None)
+                folium.TileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr='Esri', name='Satellite').add_to(m)
+                folium.TileLayer('OpenStreetMap', name="Plan").add_to(m)
+                folium.GeoJson(gdf, name="Limite", style_function=lambda x: {'fillColor': '#318ce7', 'color': 'black', 'weight': 2, 'fillOpacity': 0.3}).add_to(m)
+                folium.LayerControl(collapsed=False).add_to(m)
+                folium_static(m, width=1000, height=600)
             else: st.info("Sélectionnez un territoire.")
-else: st.error("Données indisponibles.")
+else:
+    st.error("Données indisponibles.")
