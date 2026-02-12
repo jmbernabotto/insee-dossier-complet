@@ -8,8 +8,11 @@ from streamlit_folium import folium_static
 import geopandas as gpd
 import re
 
-# Clé API INSEE
-API_KEY = "dfc20306-246c-477c-8203-06246c977cba"
+# Récupération de la clé API (Local ou Cloud)
+if "INSEE_API_KEY" in st.secrets:
+    API_KEY = st.secrets["INSEE_API_KEY"]
+else:
+    API_KEY = "dfc20306-246c-477c-8203-06246c977cba"
 
 st.set_page_config(page_title="INSEE Geo Finder", page_icon="🗺️", layout="wide")
 st.title("🗺️ Recherche & Cartographie INSEE")
@@ -23,15 +26,22 @@ def load_data(area_type):
             resp = requests.get(url, headers=headers)
             if resp.status_code == 200:
                 df = pd.DataFrame(resp.json())
-                return df.rename(columns={'code': 'CODE', 'intituleComplet': 'TITLE'})
+                df = df.rename(columns={'code': 'CODE', 'intituleComplet': 'TITLE'})
+                df['DISPLAY_TITLE'] = df['TITLE'] + " (" + df['CODE'] + ")"
+                return df
         elif area_type == "communes":
             url = "https://api.insee.fr/metadonnees/geo/communes"
             resp = requests.get(url, headers=headers)
             if resp.status_code == 200:
                 df = pd.DataFrame(resp.json())
-                df['DISPLAY_TITLE'] = df['intitule'] + " (" + df['code'].str[:2] + ")"
-                return df.rename(columns={'code': 'CODE', 'intitule': 'TITLE'})
-        return pynsee.get_area_list(area_type)
+                df = df.rename(columns={'code': 'CODE', 'intitule': 'TITLE'})
+                df['DISPLAY_TITLE'] = df['TITLE'] + " (" + df['CODE'] + ")"
+                return df
+        
+        df = pynsee.get_area_list(area_type)
+        if not df.empty:
+            df['DISPLAY_TITLE'] = df['TITLE'] + " (" + df['CODE'] + ")"
+        return df
     except Exception: return pd.DataFrame()
 
 @st.cache_data(show_spinner="Identification de l'EPCI...")
@@ -78,62 +88,51 @@ df_list = load_data(area_key)
 
 if not df_list.empty:
     st.sidebar.markdown("---")
+    final_code, final_name = None, None
     
     if area_key == "EPCI":
         search_mode = st.sidebar.radio("Chercher par :", ["Nom de l'EPCI", "Commune membre"])
-        search_query = st.sidebar.text_input("🔍 Saisie", placeholder="Vernon, Blois, Nantes...")
+        search_query = st.sidebar.text_input("🔍 Saisie", placeholder="Vernon, Agglopolys...")
         
         if search_query:
             if search_mode == "Nom de l'EPCI":
-                mask = df_list['TITLE'].str.contains(search_query, case=False, na=False)
-                results = df_list[mask].head(20)
+                mask = df_list['TITLE'].str.contains(search_query, case=False, na=False) | df_list['CODE'].str.contains(search_query)
+                results = df_list[mask].head(100)
                 if not results.empty:
-                    sel_name = st.sidebar.selectbox("Résultat", results['TITLE'].tolist())
-                    final_code = results[results['TITLE'] == sel_name].iloc[0]['CODE']
-                    final_name = sel_name
-                else:
-                    st.sidebar.error("Aucun EPCI trouvé avec ce nom.")
-                    final_code = None
+                    sel_display = st.sidebar.selectbox("Sélectionnez l'EPCI", results['DISPLAY_TITLE'].tolist())
+                    row_sel = results[results['DISPLAY_TITLE'] == sel_display].iloc[0]
+                    final_code, final_name = row_sel['CODE'], row_sel['TITLE']
+                else: st.sidebar.error("Aucun EPCI trouvé.")
             else:
-                # Mode commune membre
                 df_com = load_data("communes")
-                mask_com = df_com['TITLE'].str.contains(search_query, case=False, na=False)
-                com_results = df_com[mask_com].head(20)
+                mask_com = df_com['TITLE'].str.contains(search_query, case=False, na=False) | df_com['CODE'].str.contains(search_query)
+                com_results = df_com[mask_com].head(100)
                 if not com_results.empty:
                     sel_com_display = st.sidebar.selectbox("Sélectionnez la commune", com_results['DISPLAY_TITLE'].tolist())
                     com_code = com_results[com_results['DISPLAY_TITLE'] == sel_com_display].iloc[0]['CODE']
                     epci_info = get_epci_from_commune(com_code)
                     if epci_info:
-                        final_code = epci_info['CODE']
-                        final_name = epci_info['TITLE']
-                        st.sidebar.success(f"EPCI trouvé : {final_name}")
-                    else:
-                        st.sidebar.warning("Cette commune ne semble pas appartenir à un EPCI.")
-                        final_code = None
-                else:
-                    st.sidebar.error("Commune non trouvée.")
-                    final_code = None
-        else: final_code = None
+                        final_code, final_name = epci_info['CODE'], epci_info['TITLE']
+                        st.sidebar.success(f"Rattaché à : {final_name}")
+                    else: st.sidebar.warning("Aucun EPCI trouvé pour cette commune.")
+                else: st.sidebar.error("Commune non trouvée.")
     else:
-        # Recherche standard pour les autres catégories
         search_query = st.sidebar.text_input("🔍 Rechercher", placeholder="Nom ou Code...")
         if search_query:
             df_list['norm_title'] = df_list['TITLE'].apply(normalize_text)
             mask = df_list.apply(lambda row: all(kw in row['norm_title'] for kw in normalize_text(search_query).split()) or search_query in str(row['CODE']), axis=1)
-            results = df_list[mask].head(20)
+            results = df_list[mask].head(100)
             if not results.empty:
-                final_name = st.sidebar.selectbox("Résultat", results['TITLE'].tolist())
-                final_code = results[results['TITLE'] == final_name].iloc[0]['CODE']
-            else:
-                st.sidebar.error("Aucun résultat.")
-                final_code = None
-        else: final_code = None
+                sel_display = st.sidebar.selectbox("Sélectionnez le résultat", results['DISPLAY_TITLE'].tolist())
+                row_sel = results[results['DISPLAY_TITLE'] == sel_display].iloc[0]
+                final_code, final_name = row_sel['CODE'], row_sel['TITLE']
+            else: st.sidebar.error("Aucun résultat.")
 
     if final_code:
         col_info, col_map = st.columns([1, 3])
         with col_info:
             st.subheader(final_name)
-            st.metric("Identifiant", final_code)
+            st.metric("Code", final_code)
             prefixes = {"communes":"COM", "EPCI":"EPCI", "departements":"DEP", "regions":"REG", "airesDAttractionDesVilles2020":"AAV2020", "unitesUrbaines2020":"UU2020", "zonesDEmploi2020":"ZE2020", "bassinsDeVie2022":"BV2022"}
             st.link_button("📄 Dossier Complet INSEE", f"https://www.insee.fr/fr/statistiques/2011101?geo={prefixes.get(area_key, 'COM')}-{final_code}", use_container_width=True, type="primary")
             
