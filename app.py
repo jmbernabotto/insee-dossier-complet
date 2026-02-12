@@ -8,7 +8,7 @@ from streamlit_folium import folium_static
 import geopandas as gpd
 import re
 
-# Récupération de la clé API (Local ou Cloud)
+# Récupération de la clé API
 API_KEY = st.secrets.get("INSEE_API_KEY", "dfc20306-246c-477c-8203-06246c977cba")
 
 st.set_page_config(page_title="INSEE Geo Finder", page_icon="🗺️", layout="wide")
@@ -40,7 +40,7 @@ def load_data(area_type):
         return df
     except Exception: return pd.DataFrame()
 
-@st.cache_data(show_spinner="Identification de l'EPCI...")
+@st.cache_data(show_spinner=False)
 def get_epci_from_commune(com_code):
     headers = {"Authorization": f"Bearer {API_KEY}", "Accept": "application/json"}
     url = f"https://api.insee.fr/metadonnees/geo/commune/{com_code}/ascendants?type=Intercommunalite"
@@ -52,19 +52,36 @@ def get_epci_from_commune(com_code):
     except: pass
     return None
 
-@st.cache_data(show_spinner=False)
-def get_geometry_robust(area_type, code, name):
+def get_osm_geometry(name):
+    """Source de secours via OpenStreetMap"""
     try:
-        geo_map = {"communes": "ADMINEXPRESS-COG-CARTO.LATEST:commune", "EPCI": "ADMINEXPRESS-COG-CARTO.LATEST:epci", "departements": "ADMINEXPRESS-COG-CARTO.LATEST:departement", "regions": "ADMINEXPRESS-COG-CARTO.LATEST:region"}
-        gdf = pynsee.get_geodata(geo_map.get(area_type, ""))
-        code_col = 'code_siren' if area_type == "EPCI" else 'code_insee'
-        if code_col not in gdf.columns:
-            for alt in ['code', 'insee_com']:
-                if alt in gdf.columns: code_col = alt; break
-        gdf_filtered = gdf[gdf[code_col] == code]
-        if not gdf_filtered.empty: return gdf_filtered.to_crs("EPSG:4326")
+        clean_name = name.split('(')[0].strip()
+        url = f"https://nominatim.openstreetmap.org/search?q={clean_name}, France&format=geojson&polygon_geojson=1&limit=1"
+        resp = requests.get(url, headers={'User-Agent': 'InseeGeoApp-PublicIA'}, timeout=5)
+        if resp.status_code == 200 and resp.json()['features']:
+            gdf = gpd.GeoDataFrame.from_features(resp.json()['features'])
+            gdf.crs = "EPSG:4326"
+            return gdf
     except: pass
     return None
+
+@st.cache_data(show_spinner="Récupération du contour...")
+def get_geometry_robust(area_type, code, name):
+    # 1. Tentative IGN via pynsee
+    try:
+        geo_map = {"communes": "ADMINEXPRESS-COG-CARTO.LATEST:commune", "EPCI": "ADMINEXPRESS-COG-CARTO.LATEST:epci", "departements": "ADMINEXPRESS-COG-CARTO.LATEST:departement", "regions": "ADMINEXPRESS-COG-CARTO.LATEST:region"}
+        if area_type in geo_map:
+            gdf = pynsee.get_geodata(geo_map[area_type])
+            code_col = 'code_siren' if area_type == "EPCI" else 'code_insee'
+            if code_col not in gdf.columns:
+                for alt in ['code', 'insee_com']:
+                    if alt in gdf.columns: code_col = alt; break
+            gdf_filtered = gdf[gdf[code_col] == code]
+            if not gdf_filtered.empty: return gdf_filtered.to_crs("EPSG:4326")
+    except: pass
+    
+    # 2. Fallback OSM
+    return get_osm_geometry(name)
 
 def normalize_text(text):
     return unidecode.unidecode(str(text)).lower()
@@ -108,8 +125,7 @@ if not df_list.empty:
     else:
         search_query = st.sidebar.text_input("🔍 Rechercher", placeholder="Nom ou Code...")
         if search_query:
-            df_list['norm_title'] = df_list['TITLE'].apply(normalize_text)
-            mask = df_list.apply(lambda row: all(kw in row['norm_title'] for kw in normalize_text(search_query).split()) or search_query in str(row['CODE']), axis=1)
+            mask = df_list.apply(lambda row: all(kw in normalize_text(row['TITLE']) for kw in normalize_text(search_query).split()) or search_query in str(row['CODE']), axis=1)
             results = df_list[mask].head(100)
             if not results.empty:
                 sel_display = st.sidebar.selectbox("Sélectionnez le résultat", results['DISPLAY_TITLE'].tolist())
@@ -128,16 +144,19 @@ if not df_list.empty:
             if gdf is not None:
                 st.success("✅ Contour chargé")
                 st.download_button("📥 GeoJSON", gdf.to_json(), f"{final_code}.geojson")
-            else: st.error("❌ Contour non trouvé")
+            else: st.warning("⚠️ Contour indisponible")
 
         with col_map:
             if gdf is not None:
-                centroid = gdf.geometry.centroid.iloc[0]
-                m = folium.Map(location=[centroid.y, centroid.x], zoom_start=11, tiles=None)
-                folium.TileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr='Esri', name='Satellite').add_to(m)
-                folium.TileLayer('OpenStreetMap', name="Plan").add_to(m)
-                folium.GeoJson(gdf, name="Limite", style_function=lambda x: {'fillColor': '#318ce7', 'color': 'black', 'weight': 2, 'fillOpacity': 0.3}).add_to(m)
-                folium.LayerControl(collapsed=False).add_to(m)
-                folium_static(m, width=1000, height=600)
-else:
-    st.error("Données indisponibles.")
+                try:
+                    centroid = gdf.geometry.centroid.iloc[0]
+                    m = folium.Map(location=[centroid.y, centroid.x], zoom_start=11, tiles=None)
+                    folium.TileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr='Esri', name='Satellite').add_to(m)
+                    folium.TileLayer('OpenStreetMap', name="Plan").add_to(m)
+                    folium.GeoJson(gdf, name="Limite", style_function=lambda x: {'fillColor': '#318ce7', 'color': 'black', 'weight': 2, 'fillOpacity': 0.3}).add_to(m)
+                    folium.LayerControl(collapsed=False).add_to(m)
+                    folium_static(m, width=1000, height=600)
+                except Exception as e:
+                    st.error(f"Erreur d'affichage carte : {e}")
+            else: st.info("Sélectionnez un territoire.")
+else: st.error("Données indisponibles.")
