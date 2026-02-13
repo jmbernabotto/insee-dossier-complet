@@ -122,7 +122,25 @@ if data:
             
             prefix = "EPCI" if type_col == "EPCI" else ("COM" if type_col == "communes" else ("DEP" if type_col == "departements" else "REG"))
             url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
-            col1.link_button("📄 Voir le dossier INSEE", url_insee, use_container_width=True)
+            col1.link_button("📄 Voir le dossier (Web)", url_insee, use_container_width=True)
+            
+            # Téléchargement du PDF intégré
+            url_pdf = f"{url_insee}&format=pdf"
+            try:
+                with st.spinner("Génération du PDF par l'INSEE..."):
+                    pdf_response = requests.get(url_pdf, timeout=30)
+                    if pdf_response.status_code == 200:
+                        col1.download_button(
+                            label="📥 Télécharger le dossier PDF",
+                            data=pdf_response.content,
+                            file_name=f"Dossier_INSEE_{row['CODE']}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
+                    else:
+                        col1.warning("Le PDF n'est pas disponible pour ce territoire.")
+            except Exception as e:
+                col1.error("Erreur lors de la récupération du PDF.")
             
             if gdf is not None:
                 with col2:
