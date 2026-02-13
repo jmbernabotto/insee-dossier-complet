@@ -28,46 +28,51 @@ def load_insee(endpt):
 
 @st.cache_data
 def get_geo(code, kind, name):
-    m = {"EPCI": "epcis", "communes": "communes", "departements": "departements", "regions": "regions"}
-    if kind not in m: return None
-    
     clean_code = str(code).strip()
-    # On tente d'abord l'URL directe
-    url = f"https://geo.api.gouv.fr/{m[kind]}/{clean_code}?format=geojson&geometry=contour"
     
-    try:
-        r = requests.get(url, headers={'User-Agent': 'DossierInseeApp/1.0'}, timeout=10)
-        if r.status_code != 200:
-            # Fallback sur l'URL de recherche
-            url = f"https://geo.api.gouv.fr/{m[kind]}?code={clean_code}&format=geojson&geometry=contour"
+    # Stratégie différenciée selon le type de territoire
+    if kind in ["communes", "EPCI"]:
+        m = {"EPCI": "epcis", "communes": "communes"}
+        url = f"https://geo.api.gouv.fr/{m[kind]}/{clean_code}?format=geojson&geometry=contour"
+        try:
             r = requests.get(url, timeout=10)
-            
-        if r.status_code == 200:
-            data = r.json()
-            features = []
-            
-            # Normalisation manuelle des données reçues
-            if isinstance(data, list):
-                for item in data:
-                    geom = item.get('geometry') or item.get('contour')
-                    if geom:
-                        features.append({"type": "Feature", "geometry": geom, "properties": item})
-            elif isinstance(data, dict):
-                if data.get('type') == 'FeatureCollection':
-                    features = data.get('features', [])
-                elif data.get('type') == 'Feature':
-                    features = [data]
-                else:
-                    geom = data.get('geometry') or data.get('contour')
-                    if geom:
-                        features.append({"type": "Feature", "geometry": geom, "properties": data})
+            if r.status_code == 200:
+                data = r.json()
+                features = [data] if data.get('type') == 'Feature' else data.get('features', [])
+                if features:
+                    return gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
+        except: pass
+    
+    elif kind == "departements":
+        # Source alternative fiable pour les départements
+        url = f"https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/departements/{clean_code}-{name.lower().replace(' ', '-').replace('\'', '-')}/departement-{clean_code}-{name.lower().replace(' ', '-').replace('\'', '-')}.geojson"
+        # Version simplifiée de l'URL si la complexe échoue
+        urls = [
+            url,
+            f"https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/departements.geojson"
+        ]
+        for u in urls:
+            try:
+                r = requests.get(u, timeout=10)
+                if r.status_code == 200:
+                    gdf = gpd.read_file(io.StringIO(r.text))
+                    # Si on a chargé le fichier complet, on filtre
+                    if 'code' in gdf.columns:
+                        gdf = gdf[gdf['code'] == clean_code]
+                    if not gdf.empty: return gdf
+            except: continue
 
-            if features:
-                return gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
-            else:
-                st.error(f"Aucune géométrie trouvée dans la réponse pour {clean_code}")
-    except Exception as e:
-        st.error(f"Erreur technique Géo : {e}")
+    elif kind == "regions":
+        url = "https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/regions.geojson"
+        try:
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                gdf = gpd.read_file(io.StringIO(r.text))
+                if 'code' in gdf.columns:
+                    gdf = gdf[gdf['code'] == clean_code]
+                if not gdf.empty: return gdf
+        except: pass
+        
     return None
 
 st.title("📊 Dossier INSEE")
