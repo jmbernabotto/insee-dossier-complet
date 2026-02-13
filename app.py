@@ -26,7 +26,7 @@ def get_geo(code, kind, name):
     m = {"EPCI": "epcis", "communes": "communes", "departements": "departements", "regions": "regions"}
     if kind in m:
         try:
-            r = requests.get(f"https://geo.api.gouv.fr/{m[kind]}/{code}?format=geojson&geometry=contour")
+            r = requests.get(f"https://geo.api.gouv.fr/{m[kind]}/{code}?format=geojson&geometry=contour", timeout=10)
             if r.status_code == 200:
                 gdf = gpd.read_file(io.StringIO(r.text))
                 if not gdf.empty: return gdf
@@ -45,6 +45,8 @@ if data:
     df = df.rename(columns={c_col: 'CODE', t_col: 'TITLE'})
     df['CODE'] = df['CODE'].astype(str)
     if type_col == "EPCI": df['CODE'] = df['CODE'].str.zfill(9)
+    elif type_col == "communes": df['CODE'] = df['CODE'].str.zfill(5)
+    elif type_col in ["departements", "regions"]: df['CODE'] = df['CODE'].str.zfill(2)
     
     search = st.sidebar.text_input("Rechercher")
     if search:
