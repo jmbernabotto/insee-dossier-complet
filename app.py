@@ -8,7 +8,7 @@ import numpy as np
 from streamlit_folium import st_folium
 import io
 
-st.set_page_config(page_title="INSEE Finder", layout="wide")
+st.set_page_config(page_title="Dossier INSEE", layout="wide")
 
 INSEE_KEY = st.secrets.get("INSEE_API_KEY", "dfc20306-246c-477c-8203-06246c977cba")
 
@@ -33,7 +33,7 @@ def get_geo(code, kind, name):
         except: pass
     return None
 
-st.title("🗺️ Test Cartographie")
+st.title("📊 Dossier INSEE")
 
 type_col = st.sidebar.selectbox("Type", ["communes", "EPCI", "departements", "regions"])
 data = load_insee("intercommunalites" if type_col == "EPCI" else type_col)
@@ -54,6 +54,8 @@ if data:
             row = res[res['TITLE'] == sel].iloc[0]
             
             gdf = get_geo(row['CODE'], type_col, row['TITLE'])
+            
+            st.header(row['TITLE'])
             
             col1, col2 = st.columns([1, 2])
             col1.metric("Territoire", row['TITLE'])
