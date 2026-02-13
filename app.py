@@ -23,20 +23,31 @@ def load_insee(endpt):
             st.error(f"Erreur API INSEE {r.status_code} pour {endpt}")
             return []
     except Exception as e:
-        st.error(f"Erreur de connexion : {e}")
+        st.error(f"Erreur de connexion INSEE : {e}")
         return []
 
 @st.cache_data
 def get_geo(code, kind, name):
     m = {"EPCI": "epcis", "communes": "communes", "departements": "departements", "regions": "regions"}
-    if kind in m:
-        try:
-            clean_code = str(code).strip()
-            r = requests.get(f"https://geo.api.gouv.fr/{m[kind]}/{clean_code}?format=geojson&geometry=contour", timeout=10)
-            if r.status_code == 200:
+    if kind not in m: return None
+    
+    clean_code = str(code).strip()
+    # On enlève geometry=contour par défaut pour tester la forme la plus simple
+    url = f"https://geo.api.gouv.fr/{m[kind]}/{clean_code}?format=geojson"
+    
+    try:
+        r = requests.get(url, headers={'User-Agent': 'DossierInseeApp/1.0'}, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get('type') == 'Feature':
+                gdf = gpd.GeoDataFrame.from_features([data], crs="EPSG:4326")
+            else:
                 gdf = gpd.read_file(io.StringIO(r.text))
-                if not gdf.empty: return gdf
-        except: pass
+            if not gdf.empty: return gdf
+        else:
+            st.error(f"API Géo ({m[kind]}) : Erreur {r.status_code} pour le code {clean_code}")
+    except Exception as e:
+        st.error(f"Erreur technique Géo : {e}")
     return None
 
 st.title("📊 Dossier INSEE")
@@ -47,7 +58,7 @@ data = load_insee("intercommunalites" if type_col == "EPCI" else type_col)
 if data:
     df = pd.DataFrame(data)
     
-    # Détection intelligente des colonnes de code et titre
+    # Détection des colonnes
     possible_codes = ['code', 'codeRegion', 'codeDepartement', 'codeEpci']
     c_col = next((c for c in possible_codes if c in df.columns), df.columns[0])
     
@@ -62,12 +73,10 @@ if data:
     df = df.rename(columns={c_col: 'CODE', t_col: 'TITLE'})
     df['CODE'] = df['CODE'].astype(str).str.strip()
     
-    # Formatage rigoureux des codes
+    # Padding
     if type_col == "EPCI": df['CODE'] = df['CODE'].str.zfill(9)
     elif type_col == "communes": df['CODE'] = df['CODE'].str.zfill(5)
-    elif type_col in ["departements", "regions"]: 
-        # Pour les départements, on garde 2 caractères (ex: 01) sauf cas particuliers
-        df['CODE'] = df['CODE'].str.zfill(2)
+    elif type_col in ["departements", "regions"]: df['CODE'] = df['CODE'].str.zfill(2)
     
     search = st.sidebar.text_input("Rechercher")
     if search:
@@ -86,7 +95,6 @@ if data:
             col1.metric("Territoire", row['TITLE'])
             col1.write(f"Code : {row['CODE']}")
             
-            # Lien vers le dossier INSEE
             prefix = "EPCI" if type_col == "EPCI" else ("COM" if type_col == "communes" else ("DEP" if type_col == "departements" else "REG"))
             url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
             col1.link_button("📄 Voir le dossier INSEE", url_insee, use_container_width=True)
@@ -102,9 +110,6 @@ if data:
                     
                     geojson_data = json.loads(gdf.to_json())
                     folium.GeoJson(geojson_data).add_to(m)
-                    
                     st_folium(m, width=700, height=500, returned_objects=[])
-            else:
-                col1.error(f"Contour non trouvé pour le code {row['CODE']}")
         else:
-            st.sidebar.warning("Aucun résultat trouvé.")
+            st.sidebar.warning("Aucun résultat.")
