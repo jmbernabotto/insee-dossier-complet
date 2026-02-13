@@ -28,11 +28,11 @@ def load_insee(endpt):
 
 @st.cache_data
 def get_geo(code, kind, name):
-    # Priorité API Géo Etalab
     m = {"EPCI": "epcis", "communes": "communes", "departements": "departements", "regions": "regions"}
     if kind in m:
         try:
-            r = requests.get(f"https://geo.api.gouv.fr/{m[kind]}/{code}?format=geojson&geometry=contour", timeout=10)
+            clean_code = str(code).strip()
+            r = requests.get(f"https://geo.api.gouv.fr/{m[kind]}/{clean_code}?format=geojson&geometry=contour", timeout=10)
             if r.status_code == 200:
                 gdf = gpd.read_file(io.StringIO(r.text))
                 if not gdf.empty: return gdf
@@ -47,27 +47,30 @@ data = load_insee("intercommunalites" if type_col == "EPCI" else type_col)
 if data:
     df = pd.DataFrame(data)
     
-    # Détection plus souple des colonnes
-    c_col = 'code' if 'code' in df.columns else df.columns[0]
+    # Détection intelligente des colonnes de code et titre
+    possible_codes = ['code', 'codeRegion', 'codeDepartement', 'codeEpci']
+    c_col = next((c for c in possible_codes if c in df.columns), df.columns[0])
     
     if 'intituleComplet' in df.columns:
         t_col = 'intituleComplet'
     elif 'intitule' in df.columns:
         t_col = 'intitule'
     else:
-        # Fallback sur la première colonne qui n'est pas le code
         t_cols = [c for c in df.columns if c != c_col]
         t_col = t_cols[0] if t_cols else c_col
 
     df = df.rename(columns={c_col: 'CODE', t_col: 'TITLE'})
-    df['CODE'] = df['CODE'].astype(str)
+    df['CODE'] = df['CODE'].astype(str).str.strip()
+    
+    # Formatage rigoureux des codes
     if type_col == "EPCI": df['CODE'] = df['CODE'].str.zfill(9)
     elif type_col == "communes": df['CODE'] = df['CODE'].str.zfill(5)
-    elif type_col in ["departements", "regions"]: df['CODE'] = df['CODE'].str.zfill(2)
+    elif type_col in ["departements", "regions"]: 
+        # Pour les départements, on garde 2 caractères (ex: 01) sauf cas particuliers
+        df['CODE'] = df['CODE'].str.zfill(2)
     
     search = st.sidebar.text_input("Rechercher")
     if search:
-        # Recherche robuste gérant les NaN
         mask = df['TITLE'].str.contains(search, case=False, na=False) | df['CODE'].str.contains(search, na=False)
         res = df[mask].head(10)
         
@@ -90,21 +93,18 @@ if data:
             
             if gdf is not None:
                 with col2:
-                    # Calcul du centre
                     center = gdf.to_crs(epsg=3857).centroid.to_crs(epsg=4326).iloc[0]
-                    m = folium.Map(location=[center.y, center.x], zoom_start=9)
+                    m = folium.Map(location=[center.y, center.x], zoom_start=7 if type_col in ["regions", "departements"] else 9)
                     
-                    # Nettoyage des colonnes pour éviter l'erreur ndarray/JSON
                     for col in gdf.columns:
                         if col != 'geometry':
                             gdf[col] = gdf[col].astype(str)
                     
-                    # Conversion sécurisée
                     geojson_data = json.loads(gdf.to_json())
                     folium.GeoJson(geojson_data).add_to(m)
                     
                     st_folium(m, width=700, height=500, returned_objects=[])
             else:
-                col1.error("Contour non trouvé")
+                col1.error(f"Contour non trouvé pour le code {row['CODE']}")
         else:
-            st.sidebar.warning("Aucun résultat trouvé pour cette recherche.")
+            st.sidebar.warning("Aucun résultat trouvé.")
