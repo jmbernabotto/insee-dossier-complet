@@ -124,7 +124,7 @@ if data:
             url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
             
             col1.link_button("📄 Voir le dossier complet", url_insee, use_container_width=True)
-            col1.info("💡 **Pour obtenir le PDF** :\n1. Cliquez sur le bouton ci-dessus.\n2. Sur le site, faites **Ctrl+P**.\n3. Choisissez 'Enregistrer au format PDF'.")
+            col1.caption("💡 Cliquez sur le bouton puis sur **Imprimer** en haut du dossier et choisir le format PDF.")
             
             if gdf is not None:
                 with col2:
