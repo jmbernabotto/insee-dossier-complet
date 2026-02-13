@@ -67,7 +67,10 @@ if data:
     
     search = st.sidebar.text_input("Rechercher")
     if search:
-        res = df[df['TITLE'].str.contains(search, case=False) | df['CODE'].str.contains(search)].head(10)
+        # Recherche robuste gérant les NaN
+        mask = df['TITLE'].str.contains(search, case=False, na=False) | df['CODE'].str.contains(search, na=False)
+        res = df[mask].head(10)
+        
         if not res.empty:
             sel = st.sidebar.selectbox("Choisir", res['TITLE'].tolist())
             row = res[res['TITLE'] == sel].iloc[0]
@@ -79,7 +82,7 @@ if data:
             col1, col2 = st.columns([1, 2])
             col1.metric("Territoire", row['TITLE'])
             col1.write(f"Code : {row['CODE']}")
-
+            
             # Lien vers le dossier INSEE
             prefix = "EPCI" if type_col == "EPCI" else ("COM" if type_col == "communes" else ("DEP" if type_col == "departements" else "REG"))
             url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
@@ -103,3 +106,5 @@ if data:
                     st_folium(m, width=700, height=500, returned_objects=[])
             else:
                 col1.error("Contour non trouvé")
+        else:
+            st.sidebar.warning("Aucun résultat trouvé pour cette recherche.")
