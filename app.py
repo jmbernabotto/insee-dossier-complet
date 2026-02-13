@@ -4,6 +4,7 @@ import requests
 import geopandas as gpd
 import folium
 import json
+import numpy as np
 from streamlit_folium import st_folium
 import io
 
@@ -60,12 +61,18 @@ if data:
             
             if gdf is not None:
                 with col2:
+                    # Calcul du centre
                     center = gdf.to_crs(epsg=3857).centroid.to_crs(epsg=4326).iloc[0]
                     m = folium.Map(location=[center.y, center.x], zoom_start=9)
                     
-                    # Correction : conversion en GeoJSON via string pour éviter les erreurs de types numpy
-                    geojson_str = gdf.to_json()
-                    folium.GeoJson(json.loads(geojson_str)).add_to(m)
+                    # Nettoyage des colonnes pour éviter l'erreur ndarray/JSON
+                    for col in gdf.columns:
+                        if col != 'geometry':
+                            gdf[col] = gdf[col].astype(str)
+                    
+                    # Conversion sécurisée
+                    geojson_data = json.loads(gdf.to_json())
+                    folium.GeoJson(geojson_data).add_to(m)
                     
                     st_folium(m, width=700, height=500, returned_objects=[])
             else:
