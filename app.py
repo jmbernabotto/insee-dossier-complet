@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import geopandas as gpd
 import folium
+import json
 from streamlit_folium import st_folium
 import io
 
@@ -61,7 +62,11 @@ if data:
                 with col2:
                     center = gdf.to_crs(epsg=3857).centroid.to_crs(epsg=4326).iloc[0]
                     m = folium.Map(location=[center.y, center.x], zoom_start=9)
-                    folium.GeoJson(gdf).add_to(m)
+                    
+                    # Correction : conversion en GeoJSON via string pour éviter les erreurs de types numpy
+                    geojson_str = gdf.to_json()
+                    folium.GeoJson(json.loads(geojson_str)).add_to(m)
+                    
                     st_folium(m, width=700, height=500, returned_objects=[])
             else:
                 col1.error("Contour non trouvé")
