@@ -58,6 +58,11 @@ if data:
             col1, col2 = st.columns([1, 2])
             col1.metric("Territoire", row['TITLE'])
             col1.write(f"Code : {row['CODE']}")
+
+            # Lien vers le dossier INSEE
+            prefix = "EPCI" if type_col == "EPCI" else ("COM" if type_col == "communes" else ("DEP" if type_col == "departements" else "REG"))
+            url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
+            col1.link_button("📄 Voir le dossier INSEE", url_insee, use_container_width=True)
             
             if gdf is not None:
                 with col2:
