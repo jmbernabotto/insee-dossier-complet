@@ -32,16 +32,40 @@ def get_geo(code, kind, name):
     if kind not in m: return None
     
     clean_code = str(code).strip()
-    # Utilisation du point d'entrée collection avec filtre pour garantir une FeatureCollection
-    url = f"https://geo.api.gouv.fr/{m[kind]}?code={clean_code}&format=geojson&geometry=contour"
+    # On tente d'abord l'URL directe
+    url = f"https://geo.api.gouv.fr/{m[kind]}/{clean_code}?format=geojson&geometry=contour"
     
     try:
         r = requests.get(url, headers={'User-Agent': 'DossierInseeApp/1.0'}, timeout=10)
+        if r.status_code != 200:
+            # Fallback sur l'URL de recherche
+            url = f"https://geo.api.gouv.fr/{m[kind]}?code={clean_code}&format=geojson&geometry=contour"
+            r = requests.get(url, timeout=10)
+            
         if r.status_code == 200:
-            gdf = gpd.read_file(io.StringIO(r.text))
-            if not gdf.empty: return gdf
-        else:
-            st.error(f"API Géo ({m[kind]}) : Erreur {r.status_code} pour le code {clean_code}")
+            data = r.json()
+            features = []
+            
+            # Normalisation manuelle des données reçues
+            if isinstance(data, list):
+                for item in data:
+                    geom = item.get('geometry') or item.get('contour')
+                    if geom:
+                        features.append({"type": "Feature", "geometry": geom, "properties": item})
+            elif isinstance(data, dict):
+                if data.get('type') == 'FeatureCollection':
+                    features = data.get('features', [])
+                elif data.get('type') == 'Feature':
+                    features = [data]
+                else:
+                    geom = data.get('geometry') or data.get('contour')
+                    if geom:
+                        features.append({"type": "Feature", "geometry": geom, "properties": data})
+
+            if features:
+                return gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
+            else:
+                st.error(f"Aucune géométrie trouvée dans la réponse pour {clean_code}")
     except Exception as e:
         st.error(f"Erreur technique Géo : {e}")
     return None
