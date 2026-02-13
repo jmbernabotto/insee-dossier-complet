@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import geopandas as gpd
 import folium
+import numpy as np
 from streamlit_folium import st_folium
 import io
 
@@ -61,6 +62,14 @@ if data:
                 with col2:
                     center = gdf.to_crs(epsg=3857).centroid.to_crs(epsg=4326).iloc[0]
                     m = folium.Map(location=[center.y, center.x], zoom_start=9)
+                    
+                    # Convertir les types numpy en types Python natifs
+                    for col in gdf.select_dtypes(include=[np.number]).columns:
+                        gdf[col] = gdf[col].astype(float)
+                    
+                    # Remplacer les NaN (non JSON-sérialisables)
+                    gdf = gdf.fillna("")
+                    
                     folium.GeoJson(gdf).add_to(m)
                     st_folium(m, width=700, height=500, returned_objects=[])
             else:
