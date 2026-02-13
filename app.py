@@ -17,8 +17,14 @@ def load_insee(endpt):
     h = {"Authorization": f"Bearer {INSEE_KEY}", "Accept": "application/json"}
     try:
         r = requests.get(f"https://api.insee.fr/metadonnees/geo/{endpt}", headers=h)
-        return r.json() if r.status_code == 200 else []
-    except: return []
+        if r.status_code == 200:
+            return r.json()
+        else:
+            st.error(f"Erreur API INSEE {r.status_code} pour {endpt}")
+            return []
+    except Exception as e:
+        st.error(f"Erreur de connexion : {e}")
+        return []
 
 @st.cache_data
 def get_geo(code, kind, name):
@@ -40,8 +46,19 @@ data = load_insee("intercommunalites" if type_col == "EPCI" else type_col)
 
 if data:
     df = pd.DataFrame(data)
-    c_col = 'code'
-    t_col = 'intituleComplet' if 'intituleComplet' in df.columns else 'intitule'
+    
+    # Détection plus souple des colonnes
+    c_col = 'code' if 'code' in df.columns else df.columns[0]
+    
+    if 'intituleComplet' in df.columns:
+        t_col = 'intituleComplet'
+    elif 'intitule' in df.columns:
+        t_col = 'intitule'
+    else:
+        # Fallback sur la première colonne qui n'est pas le code
+        t_cols = [c for c in df.columns if c != c_col]
+        t_col = t_cols[0] if t_cols else c_col
+
     df = df.rename(columns={c_col: 'CODE', t_col: 'TITLE'})
     df['CODE'] = df['CODE'].astype(str)
     if type_col == "EPCI": df['CODE'] = df['CODE'].str.zfill(9)
