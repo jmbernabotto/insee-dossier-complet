@@ -123,9 +123,8 @@ if data:
             prefix = "EPCI" if type_col == "EPCI" else ("COM" if type_col == "communes" else ("DEP" if type_col == "departements" else "REG"))
             url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
             
-            col1.link_button("🌐 Voir le dossier interactif", url_insee, use_container_width=True)
-            col1.link_button("🖨️ Version imprimable (PDF)", f"{url_insee}&view=print", use_container_width=True)
-            col1.info("💡 **Pour enregistrer en PDF** : sur la page imprimable, faites **Ctrl+P** (ou Cmd+P) et choisissez 'Enregistrer au format PDF'.")
+            col1.link_button("📄 Voir le dossier complet", url_insee, use_container_width=True)
+            col1.info("💡 **Pour obtenir le PDF** :\n1. Cliquez sur le bouton ci-dessus.\n2. Sur le site, faites **Ctrl+P**.\n3. Choisissez 'Enregistrer au format PDF'.")
             
             if gdf is not None:
                 with col2:
