@@ -32,17 +32,20 @@ def get_geo(code, kind, name):
     if kind not in m: return None
     
     clean_code = str(code).strip()
-    # On enlève geometry=contour par défaut pour tester la forme la plus simple
-    url = f"https://geo.api.gouv.fr/{m[kind]}/{clean_code}?format=geojson"
+    url = f"https://geo.api.gouv.fr/{m[kind]}/{clean_code}?format=geojson&geometry=contour"
     
     try:
         r = requests.get(url, headers={'User-Agent': 'DossierInseeApp/1.0'}, timeout=10)
         if r.status_code == 200:
             data = r.json()
+            # Traitement direct du JSON pour éviter l'erreur de fichier
             if data.get('type') == 'Feature':
                 gdf = gpd.GeoDataFrame.from_features([data], crs="EPSG:4326")
+            elif data.get('type') == 'FeatureCollection':
+                gdf = gpd.GeoDataFrame.from_features(data, crs="EPSG:4326")
             else:
                 gdf = gpd.read_file(io.StringIO(r.text))
+            
             if not gdf.empty: return gdf
         else:
             st.error(f"API Géo ({m[kind]}) : Erreur {r.status_code} pour le code {clean_code}")
