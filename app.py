@@ -5,6 +5,7 @@ import geopandas as gpd
 import folium
 import json
 import numpy as np
+from unidecode import unidecode
 from streamlit_folium import st_folium
 import io
 
@@ -106,9 +107,15 @@ if data:
     # Création du libellé d'affichage (Titre + Code)
     df['DISPLAY'] = df['TITLE'] + " (" + df['CODE'] + ")"
     
+    # Clé de recherche normalisée (sans accents, sans tirets)
+    df['SEARCH_KEY'] = df['TITLE'].apply(lambda x: unidecode(str(x)).lower().replace('-', ' '))
+    
     search = st.sidebar.text_input("Rechercher")
     if search:
-        mask = df['TITLE'].str.contains(search, case=False, na=False) | df['CODE'].str.contains(search, na=False)
+        # Normalisation de la saisie utilisateur
+        search_norm = unidecode(search).lower().replace('-', ' ')
+        
+        mask = df['SEARCH_KEY'].str.contains(search_norm, na=False) | df['CODE'].str.contains(search, na=False)
         res = df[mask].head(10)
         
         if not res.empty:
