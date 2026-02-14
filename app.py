@@ -8,8 +8,21 @@ import numpy as np
 from unidecode import unidecode
 from streamlit_folium import st_folium
 import io
+import os
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+load_dotenv()
 
 st.set_page_config(page_title="Dossier INSEE", layout="wide")
+
+# Configuration Gemini
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash')
+else:
+    st.sidebar.error("Clé API Gemini manquante dans le fichier .env")
 
 INSEE_KEY = st.secrets.get("INSEE_API_KEY", "dfc20306-246c-477c-8203-06246c977cba")
 
@@ -76,6 +89,57 @@ def get_geo(code, kind, name):
         
     return None
 
+def get_territory_indicators(code, kind):
+    """Récupère des indicateurs clés pour le territoire sélectionné."""
+    indicators = {}
+    
+    # Prefix for INSEE URL
+    prefix = "EPCI" if kind == "EPCI" else ("COM" if kind == "communes" else ("DEP" if kind == "departements" else "REG"))
+    indicators['URL Dossier INSEE'] = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{code}"
+
+    if kind == "communes":
+        try:
+            r = requests.get(f"https://geo.api.gouv.fr/communes/{code}?fields=population,surface,codesPostaux,codeDepartement,codeRegion")
+            if r.status_code == 200:
+                data = r.json()
+                indicators['Population'] = data.get('population')
+                indicators['Surface (ha)'] = data.get('surface')
+                indicators['Codes Postaux'] = ", ".join(data.get('codesPostaux', []))
+                indicators['Code Département'] = data.get('codeDepartement')
+                indicators['Code Région'] = data.get('codeRegion')
+        except: pass
+    
+    # Optionnel: On pourrait ajouter des données pynsee ici si besoin
+    # Pour l'instant on se base sur l'URL et les données de base
+    return indicators
+
+def ask_gemini(prompt, context_data, territory_name):
+    """Interroge Gemini avec le contexte du territoire."""
+    if not GEMINI_KEY:
+        return "Erreur : Clé API Gemini non configurée."
+    
+    context_str = "\n".join([f"- {k}: {v}" for k, v in context_data.items()])
+    full_prompt = f"""Tu es un expert en démographie et géographie française, spécialisé dans l'analyse des données INSEE.
+Tu assistes un utilisateur qui consulte le dossier de la collectivité : {territory_name}.
+
+Voici les données clés dont tu scratches pour ce territoire :
+{context_str}
+
+L'utilisateur demande : {prompt}
+
+Instructions :
+1. Utilise les données fournies ci-dessus en priorité.
+2. Si la question porte sur des détails non présents (ex: taux de chômage, pyramide des âges), mentionne que ces informations sont disponibles dans le "Dossier complet" via l'URL fournie.
+3. Donne des réponses précises, analytiques et polies.
+4. Si tu as des connaissances générales sur {territory_name} qui complètent les données, n'hésite pas à les partager pour enrichir la réponse.
+"""
+
+    try:
+        response = model.generate_content(full_prompt)
+        return response.text
+    except Exception as e:
+        return f"Erreur lors de la génération : {e}"
+
 st.title("📊 Dossier INSEE")
 
 type_col = st.sidebar.selectbox("Type", ["communes", "EPCI", "departements", "regions"])
@@ -122,6 +186,11 @@ if data:
             sel = st.sidebar.selectbox("Choisir", res['DISPLAY'].tolist())
             row = res[res['DISPLAY'] == sel].iloc[0]
             
+            # Reset conversation if territory changes
+            if "current_territory" not in st.session_state or st.session_state.current_territory != row['CODE']:
+                st.session_state.current_territory = row['CODE']
+                st.session_state.messages = []
+
             gdf = get_geo(row['CODE'], type_col, row['TITLE'])
             
             st.header(row['TITLE'])
@@ -148,5 +217,27 @@ if data:
                     geojson_data = json.loads(gdf.to_json())
                     folium.GeoJson(geojson_data).add_to(m)
                     st_folium(m, width=700, height=500, returned_objects=[])
+            
+            st.divider()
+            st.subheader(f"💬 Assistant IA - {row['TITLE']}")
+            
+            if "messages" not in st.session_state:
+                st.session_state.messages = []
+
+            for message in st.session_state.messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+
+            if prompt := st.chat_input(f"Posez une question sur {row['TITLE']}"):
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+
+                with st.chat_message("assistant"):
+                    with st.spinner("Réflexion..."):
+                        indicators = get_territory_indicators(row['CODE'], type_col)
+                        response = ask_gemini(prompt, indicators, row['TITLE'])
+                        st.markdown(response)
+                st.session_state.messages.append({"role": "assistant", "content": response})
         else:
             st.sidebar.warning("Aucun résultat.")

@@ -8,3 +8,5 @@ streamlit-folium
 geopandas
 shapely
 numpy
+google-generativeai
+python-dotenv
