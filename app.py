@@ -103,14 +103,17 @@ if data:
     elif type_col == "communes": df['CODE'] = df['CODE'].str.zfill(5)
     elif type_col in ["departements", "regions"]: df['CODE'] = df['CODE'].str.zfill(2)
     
+    # Création du libellé d'affichage (Titre + Code)
+    df['DISPLAY'] = df['TITLE'] + " (" + df['CODE'] + ")"
+    
     search = st.sidebar.text_input("Rechercher")
     if search:
         mask = df['TITLE'].str.contains(search, case=False, na=False) | df['CODE'].str.contains(search, na=False)
         res = df[mask].head(10)
         
         if not res.empty:
-            sel = st.sidebar.selectbox("Choisir", res['TITLE'].tolist())
-            row = res[res['TITLE'] == sel].iloc[0]
+            sel = st.sidebar.selectbox("Choisir", res['DISPLAY'].tolist())
+            row = res[res['DISPLAY'] == sel].iloc[0]
             
             gdf = get_geo(row['CODE'], type_col, row['TITLE'])
             
