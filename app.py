@@ -142,15 +142,15 @@ Instructions :
 
 st.title("📊 Dossier INSEE")
 
-# Mapping pour l'API INSEE
+# Mapping pour l'API INSEE (Uniquement les points d'entrée validés 200 OK)
 type_mapping = {
     "Communes": "communes",
-    "EPCI": "intercommunalites",
+    "EPCI (Intercommunalités)": "intercommunalites",
     "Départements": "departements",
     "Régions": "regions",
-    "Collectivités Territoriales (Alsace, etc.)": "collectivitesTerritoriales",
-    "Arrondissements Municipaux": "arrondissementsMunicipaux",
-    "Arrondissements": "arrondissements"
+    "Arrondissements": "arrondissements",
+    "Arrondissements Municipaux (Paris, Lyon, Marseille)": "arrondissementsMunicipaux",
+    "Communes Associées / Déléguées": "communesDeleguees"
 }
 
 label_type = st.sidebar.selectbox("Type", list(type_mapping.keys()))
