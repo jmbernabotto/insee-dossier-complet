@@ -131,9 +131,9 @@ L'utilisateur demande : {prompt}
 
 Instructions :
 1. Utilise les données fournies ci-dessus en priorité.
-2. Si la question porte sur des détails non présents (ex: taux de chômage, pyramide des âges), mentionne que ces informations sont disponibles dans le "Dossier complet" via l'URL fournie.
-3. Donne des réponses précises, analytiques et polies.
-4. Si tu as des connaissances générales sur {territory_name} qui complètent les données, n'hésite pas à les partager pour enrichir la réponse.
+2. Si tu n'as pas de réponse à la question (que ce soit via les données fournies ou tes connaissances générales), réponds exactement : "je ne peux répondre à votre question".
+3. Si la question porte sur des détails non présents (ex: taux de chômage, pyramide des âges), mentionne que ces informations sont disponibles dans le "Dossier complet" via l'URL fournie, mais si tu ne peux apporter aucune information utile, utilise la phrase : "je ne peux répondre à votre question".
+4. Donne des réponses précises, analytiques et polies.
 """
 
     try:
