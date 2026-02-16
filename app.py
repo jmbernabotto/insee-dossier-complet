@@ -20,8 +20,8 @@ st.set_page_config(page_title="Dossier INSEE", layout="wide")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    # Retour à un modèle plus stable
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    # Utilisation du modèle 2.5 Flash
+    model = genai.GenerativeModel('gemini-2.5-flash')
 else:
     st.sidebar.error("Clé API Gemini manquante dans le fichier .env")
 
