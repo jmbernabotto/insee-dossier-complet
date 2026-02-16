@@ -142,7 +142,7 @@ Instructions :
 
 st.title("📊 Dossier INSEE")
 
-type_col = st.sidebar.selectbox("Type", ["communes", "EPCI", "departements", "regions"])
+type_col = st.sidebar.selectbox("Type", ["communes", "EPCI", "departements", "regions", "collectivitesTerritoriales", "arrondissements"])
 data = load_insee("intercommunalites" if type_col == "EPCI" else type_col)
 
 if data:
