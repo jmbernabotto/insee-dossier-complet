@@ -20,7 +20,8 @@ st.set_page_config(page_title="Dossier INSEE", layout="wide")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel('gemini-3-flash-preview')
+    # Retour à un modèle plus stable
+    model = genai.GenerativeModel('gemini-2.0-flash')
 else:
     st.sidebar.error("Clé API Gemini manquante dans le fichier .env")
 
@@ -94,7 +95,8 @@ def get_territory_indicators(code, kind):
     indicators = {}
     
     # Prefix for INSEE URL
-    prefix = "EPCI" if kind == "EPCI" else ("COM" if kind == "communes" else ("DEP" if kind == "departements" else "REG"))
+    # Correction : kind peut être "intercommunalites"
+    prefix = "EPCI" if kind in ["EPCI", "intercommunalites"] else ("COM" if kind == "communes" else ("DEP" if kind == "departements" else "REG"))
     indicators['URL Dossier INSEE'] = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{code}"
 
     if kind == "communes":
