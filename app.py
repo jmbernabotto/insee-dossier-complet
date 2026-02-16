@@ -142,8 +142,20 @@ Instructions :
 
 st.title("📊 Dossier INSEE")
 
-type_col = st.sidebar.selectbox("Type", ["communes", "EPCI", "departements", "regions", "collectivitesTerritoriales", "arrondissements"])
-data = load_insee("intercommunalites" if type_col == "EPCI" else type_col)
+# Mapping pour l'API INSEE
+type_mapping = {
+    "Communes": "communes",
+    "EPCI": "intercommunalites",
+    "Départements": "departements",
+    "Régions": "regions",
+    "Collectivités Territoriales (Alsace, etc.)": "collectivitesTerritoriales",
+    "Arrondissements Municipaux": "arrondissementsMunicipaux",
+    "Arrondissements": "arrondissements"
+}
+
+label_type = st.sidebar.selectbox("Type", list(type_mapping.keys()))
+type_col = type_mapping[label_type]
+data = load_insee(type_col)
 
 if data:
     df = pd.DataFrame(data)
