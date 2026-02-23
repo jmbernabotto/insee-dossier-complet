@@ -11,10 +11,15 @@ import io
 import os
 import google.generativeai as genai
 from dotenv import load_dotenv
+import pynsee
 
 load_dotenv()
 
 st.set_page_config(page_title="Dossier INSEE", layout="wide")
+
+# Configuration Pynsee
+os.environ['insee_key'] = 'dKfEzOwfXe8_Az8K5ZA_pY4MfpYa'
+os.environ['insee_secret'] = '4fuwyvonN8U4N9XhyfIc3VRqybga'
 
 # Configuration Gemini
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
@@ -102,6 +107,54 @@ def get_geo(code, kind, name):
         
     return None
 
+@st.cache_data
+def get_communes_of_territory(parent_code, parent_kind):
+    """Récupère toutes les communes d'un territoire parent (EPCI ou Département)."""
+    if parent_kind == "departements":
+        url = f"https://geo.api.gouv.fr/departements/{parent_code}/communes?format=geojson&geometry=contour&fields=nom,code,population"
+    elif parent_kind in ["EPCI", "intercommunalites"]:
+        url = f"https://geo.api.gouv.fr/epcis/{parent_code}/communes?format=geojson&geometry=contour&fields=nom,code,population"
+    else:
+        return None
+    
+    try:
+        r = requests.get(url, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get('features'):
+                gdf = gpd.GeoDataFrame.from_features(data['features'], crs="EPSG:4326")
+                # Calcul de la densité si possible
+                gdf['area_km2'] = gdf.to_crs(epsg=3857).area / 10**6
+                gdf['densite'] = gdf['population'] / gdf['area_km2']
+                return gdf
+    except Exception as e:
+        st.error(f"Erreur lors de la récupération des communes : {e}")
+    return None
+
+@st.cache_data
+def get_pynsee_indicators(commune_codes, indicator_type):
+    """Récupère des indicateurs pynsee pour une liste de communes."""
+    try:
+        if indicator_type == "Revenus (Médiane)":
+            df = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
+                                      nivgeo='COM', 
+                                      geocodes=commune_codes,
+                                      variables='INDICS_FILO_DISP')
+            if df is not None and 'INDICS_FILO_DISP' in df.columns:
+                df = df[df['INDICS_FILO_DISP'] == 'MED18']
+            return df
+        elif indicator_type == "Logement (Rés. Secondaires %)":
+            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', 
+                                      nivgeo='COM', 
+                                      geocodes=commune_codes,
+                                      variables='LOGEMENT')
+            if df is not None and 'LOGEMENT' in df.columns:
+                df = df[df['LOGEMENT'] == 'RSECO20']
+            return df
+    except Exception as e:
+        st.warning(f"Erreur Pynsee : {e}")
+    return None
+
 def get_territory_indicators(code, kind):
     """Récupère des indicateurs clés pour le territoire sélectionné."""
     indicators = {}
@@ -136,8 +189,6 @@ def get_territory_indicators(code, kind):
                 indicators['Code Département'] = "62"
                 indicators['Code Région'] = "32"
     
-    # Optionnel: On pourrait ajouter des données pynsee ici si besoin
-    # Pour l'instant on se base sur l'URL et les données de base
     return indicators
 
 def ask_gemini(prompt, context_data, territory_name):
@@ -234,53 +285,134 @@ if data:
                 st.session_state.current_territory = row['CODE']
                 st.session_state.messages = []
 
-            gdf = get_geo(row['CODE'], type_col, row['TITLE'])
-            
             st.header(row['TITLE'])
             
-            col1, col2 = st.columns([1, 2])
-            col1.metric("Territoire", row['TITLE'])
-            col1.write(f"Code : {row['CODE']}")
-            
-            prefix = "EPCI" if type_col in ["EPCI", "intercommunalites"] else ("COM" if type_col == "communes" else ("DEP" if type_col == "departements" else "REG"))
-            url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
-            
-            col1.link_button("📄 Voir le dossier complet", url_insee, use_container_width=True)
-            col1.caption("💡 Cliquez sur le bouton puis sur **Imprimer** en haut du dossier et choisir le format PDF.")
-            
-            if gdf is not None:
-                with col2:
-                    center = gdf.to_crs(epsg=3857).centroid.to_crs(epsg=4326).iloc[0]
-                    m = folium.Map(location=[center.y, center.x], zoom_start=7 if type_col in ["regions", "departements"] else 9)
+            # --- ONGLET ---
+            tab1, tab2 = st.tabs(["📌 Vue Générale", "🗺️ Analyse Cartographique (Communes)"])
+
+            with tab1:
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    st.metric("Territoire", row['TITLE'])
+                    st.write(f"Code : {row['CODE']}")
                     
-                    for col in gdf.columns:
-                        if col != 'geometry':
-                            gdf[col] = gdf[col].astype(str)
+                    prefix = "EPCI" if type_col in ["EPCI", "intercommunalites"] else ("COM" if type_col == "communes" else ("DEP" if type_col == "departements" else "REG"))
+                    url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
                     
-                    geojson_data = json.loads(gdf.to_json())
-                    folium.GeoJson(geojson_data).add_to(m)
-                    st_folium(m, width=700, height=500, returned_objects=[])
-            
-            st.divider()
-            st.subheader(f"💬 Assistant IA - {row['TITLE']}")
-            
-            if "messages" not in st.session_state:
-                st.session_state.messages = []
+                    st.link_button("📄 Voir le dossier complet", url_insee, use_container_width=True)
+                    st.caption("💡 Cliquez sur le bouton puis sur **Imprimer** en haut du dossier et choisir le format PDF.")
+                
+                gdf_main = get_geo(row['CODE'], type_col, row['TITLE'])
+                if gdf_main is not None:
+                    with col2:
+                        center = gdf_main.to_crs(epsg=3857).centroid.to_crs(epsg=4326).iloc[0]
+                        m = folium.Map(location=[center.y, center.x], zoom_start=7 if type_col in ["regions", "departements"] else 9)
+                        
+                        for col in gdf_main.columns:
+                            if col != 'geometry':
+                                gdf_main[col] = gdf_main[col].astype(str)
+                        
+                        geojson_data = json.loads(gdf_main.to_json())
+                        folium.GeoJson(geojson_data).add_to(m)
+                        st_folium(m, width=700, height=400, returned_objects=[], key="map_main")
 
-            for message in st.session_state.messages:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
+                st.divider()
+                st.subheader(f"💬 Assistant IA - {row['TITLE']}")
+                
+                if "messages" not in st.session_state:
+                    st.session_state.messages = []
 
-            if prompt := st.chat_input(f"Posez une question sur {row['TITLE']}"):
-                st.session_state.messages.append({"role": "user", "content": prompt})
-                with st.chat_message("user"):
-                    st.markdown(prompt)
+                for message in st.session_state.messages:
+                    with st.chat_message(message["role"]):
+                        st.markdown(message["content"])
 
-                with st.chat_message("assistant"):
-                    with st.spinner("Réflexion..."):
-                        indicators = get_territory_indicators(row['CODE'], type_col)
-                        response = ask_gemini(prompt, indicators, row['TITLE'])
-                        st.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
+                if prompt := st.chat_input(f"Posez une question sur {row['TITLE']}"):
+                    st.session_state.messages.append({"role": "user", "content": prompt})
+                    with st.chat_message("user"):
+                        st.markdown(prompt)
+
+                    with st.chat_message("assistant"):
+                        with st.spinner("Réflexion..."):
+                            indicators = get_territory_indicators(row['CODE'], type_col)
+                            response = ask_gemini(prompt, indicators, row['TITLE'])
+                            st.markdown(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+
+            with tab2:
+                if type_col in ["communes"]:
+                    st.info("Sélectionnez un EPCI ou un Département pour voir la carte communale détaillée.")
+                else:
+                    st.subheader(f"Carte des communes de : {row['TITLE']}")
+                    
+                    indicator_choice = st.selectbox("Indicateur à afficher", 
+                                                   ["Population", "Densité (hab/km²)", "Revenus (Médiane)", "Logement (Rés. Secondaires %)"])
+                    
+                    with st.spinner("Chargement des données géographiques et statistiques..."):
+                        gdf_communes = get_communes_of_territory(row['CODE'], type_col)
+                        
+                        if gdf_communes is not None:
+                            map_col = "population"
+                            legend_name = "Population"
+                            
+                            if indicator_choice == "Densité (hab/km²)":
+                                map_col = "densite"
+                                legend_name = "Densité"
+                            elif indicator_choice == "Revenus (Médiane)":
+                                pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), "Revenus (Médiane)")
+                                if pynsee_df is not None and not pynsee_df.empty:
+                                    # On suppose que OBS_VALUE est la médiane si on a bien filtré
+                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'revenu_med', 'CODEGEO': 'code'})
+                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'revenu_med']], on='code', how='left')
+                                    map_col = "revenu_med"
+                                    legend_name = "Revenu Médian (€)"
+                                else:
+                                    st.error("Données de revenus non disponibles via Pynsee.")
+                            elif indicator_choice == "Logement (Rés. Secondaires %)":
+                                pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), "Logement (Rés. Secondaires %)")
+                                if pynsee_df is not None and not pynsee_df.empty:
+                                    # On traite les données RP pour extraire les résidences secondaires
+                                    # Note: nécessite un filtrage plus précis sur les variables
+                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'res_sec', 'CODEGEO': 'code'})
+                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'res_sec']], on='code', how='left')
+                                    map_col = "res_sec"
+                                    legend_name = "Résidences Secondaires"
+                            
+                            # Suppression des lignes avec NaN pour la carte si nécessaire
+                            gdf_plot = gdf_communes.dropna(subset=[map_col])
+                            
+                            if not gdf_plot.empty:
+                                center_c = gdf_plot.to_crs(epsg=3857).centroid.to_crs(epsg=4326).unary_union.centroid
+                                m_choroplet = folium.Map(location=[center_c.y, center_c.x], zoom_start=9)
+                                
+                                folium.Choropleth(
+                                    geo_data=gdf_plot.to_json(),
+                                    name="choropleth",
+                                    data=gdf_plot,
+                                    columns=["code", map_col],
+                                    key_on="feature.properties.code",
+                                    fill_color="YlOrRd",
+                                    fill_opacity=0.7,
+                                    line_opacity=0.2,
+                                    legend_name=legend_name,
+                                ).add_to(m_choroplet)
+                                
+                                tooltip = folium.features.GeoJson(
+                                    gdf_plot.to_json(),
+                                    style_function=lambda x: {'fillColor': '#ffffff', 'color':'#000000', 'fillOpacity': 0.1, 'weight': 0.1},
+                                    control=False,
+                                    highlight_function=lambda x: {'fillColor': '#000000', 'color':'#000000', 'fillOpacity': 0.5, 'weight': 0.1},
+                                    tooltip=folium.features.GeoJsonTooltip(
+                                        fields=['nom', 'code', map_col],
+                                        aliases=['Commune: ', 'Code: ', f'{legend_name}: '],
+                                        style=("background-color: white; color: #333333; font-family: arial; font-size: 12px; padding: 10px;")
+                                    )
+                                )
+                                m_choroplet.add_child(tooltip)
+                                st_folium(m_choroplet, width=1000, height=600, key="map_choropleth")
+                            else:
+                                st.warning("Aucune donnée à afficher pour cet indicateur.")
+                        else:
+                            st.error("Impossible de charger les données communales.")
+
         else:
             st.sidebar.warning("Aucun résultat.")
