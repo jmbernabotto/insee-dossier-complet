@@ -239,6 +239,7 @@ def get_territory_indicators(code, kind):
         except:
             if code == "62498": # Fallback Lens
                 indicators['Population'] = 32920
+                indicators['Surface (ha)'] = 1170
     
     # Intégration des données FILOSOFI riches (Pauvreté, Revenus)
     # Fonctionne pour Communes, EPCI, Départements
@@ -349,9 +350,17 @@ if data:
 
             with tab1:
                 col1, col2 = st.columns([1, 2])
+                indicators = get_territory_indicators(row['CODE'], type_col)
+                
                 with col1:
                     st.metric("Territoire", row['TITLE'])
                     st.write(f"Code : {row['CODE']}")
+                    
+                    # Affichage des indicateurs FILOSOFI s'ils existent
+                    if 'Niveau de vie Médian (€)' in indicators:
+                        st.metric("Niveau de vie des individus (médian)", f"{int(indicators['Niveau de vie Médian (€)']):,} €".replace(',', ' '))
+                    if 'Taux de pauvreté (%)' in indicators:
+                        st.metric("Part des ménages pauvres", f"{indicators['Taux de pauvreté (%)']}%")
                     
                     prefix = "EPCI" if type_col in ["EPCI", "intercommunalites"] else ("COM" if type_col == "communes" else ("DEP" if type_col == "departements" else "REG"))
                     url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
@@ -391,7 +400,6 @@ if data:
 
                     with st.chat_message("assistant"):
                         with st.spinner("Réflexion..."):
-                            indicators = get_territory_indicators(row['CODE'], type_col)
                             response = ask_gemini(prompt, indicators, row['TITLE'])
                             st.markdown(response)
                     st.session_state.messages.append({"role": "assistant", "content": response})
@@ -403,7 +411,7 @@ if data:
                     st.subheader(f"Carte des communes de : {row['TITLE']}")
                     
                     indicator_choice = st.selectbox("Indicateur à afficher", 
-                                                   ["Population", "Densité (hab/km²)", "Niveau de vie Médian (€)", "Taux de pauvreté (%)", "Logement (Rés. Secondaires %)"])
+                                                   ["Population", "Densité (hab/km²)", "Niveau de vie des individus", "Part des ménages pauvres (%)", "Logement (Rés. Secondaires %)"])
                     
                     with st.spinner("Chargement des données géographiques et statistiques..."):
                         gdf_communes = get_communes_of_territory(row['CODE'], type_col)
@@ -416,20 +424,20 @@ if data:
                             if indicator_choice == "Densité (hab/km²)":
                                 map_col = "densite"
                                 legend_name = "Densité"
-                            elif indicator_choice == "Niveau de vie Médian (€)":
+                            elif indicator_choice == "Niveau de vie des individus":
                                 pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), "Niveau de vie Médian (€)")
                                 if pynsee_df is not None and not pynsee_df.empty:
                                     pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'rev_med', 'CODEGEO': 'code'})
                                     gdf_communes = gdf_communes.merge(pynsee_df[['code', 'rev_med']], on='code', how='left')
                                     map_col = "rev_med"
-                                    legend_name = "Niveau de vie Médian (€)"
+                                    legend_name = "Niveau de vie médian (€)"
                                     fill_color = "YlGn"
-                            elif indicator_choice == "Taux de pauvreté (%)":
+                            elif indicator_choice == "Part des ménages pauvres (%)":
                                 pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), "Taux de pauvreté (%)")
                                 if pynsee_df is not None and not pynsee_df.empty:
-                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'pauvreté', 'CODEGEO': 'code'})
-                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'pauvreté']], on='code', how='left')
-                                    map_col = "pauvreté"
+                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'pauvrete', 'CODEGEO': 'code'})
+                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'pauvrete']], on='code', how='left')
+                                    map_col = "pauvrete"
                                     legend_name = "Taux de pauvreté (%)"
                                     fill_color = "RdPu"
                             elif indicator_choice == "Logement (Rés. Secondaires %)":
