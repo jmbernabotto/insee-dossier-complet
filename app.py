@@ -135,13 +135,21 @@ def get_communes_of_territory(parent_code, parent_kind):
 def get_pynsee_indicators(commune_codes, indicator_type):
     """Récupère des indicateurs pynsee pour une liste de communes."""
     try:
-        if indicator_type == "Revenus (Médiane)":
+        if indicator_type == "Niveau de vie Médian (€)":
             df = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
                                       nivgeo='COM', 
                                       geocodes=commune_codes,
                                       variables='INDICS_FILO_DISP')
-            if df is not None and 'INDICS_FILO_DISP' in df.columns:
-                df = df[df['INDICS_FILO_DISP'] == 'MED18']
+            if df is not None and 'UNIT' in df.columns:
+                df = df[df['UNIT'] == 'MEDIANE']
+            return df
+        elif indicator_type == "Taux de pauvreté (%)":
+            df = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
+                                      nivgeo='COM', 
+                                      geocodes=commune_codes,
+                                      variables='INDICS_FILO_DISP_DET')
+            if df is not None and 'UNIT' in df.columns:
+                df = df[df['UNIT'] == 'TP60']
             return df
         elif indicator_type == "Logement (Rés. Secondaires %)":
             df = pynsee.get_local_data(dataset_version='GEO2023RP2020', 
@@ -345,7 +353,7 @@ if data:
                     st.subheader(f"Carte des communes de : {row['TITLE']}")
                     
                     indicator_choice = st.selectbox("Indicateur à afficher", 
-                                                   ["Population", "Densité (hab/km²)", "Revenus (Médiane)", "Logement (Rés. Secondaires %)"])
+                                                   ["Population", "Densité (hab/km²)", "Niveau de vie Médian (€)", "Taux de pauvreté (%)", "Logement (Rés. Secondaires %)"])
                     
                     with st.spinner("Chargement des données géographiques et statistiques..."):
                         gdf_communes = get_communes_of_territory(row['CODE'], type_col)
@@ -353,31 +361,36 @@ if data:
                         if gdf_communes is not None:
                             map_col = "population"
                             legend_name = "Population"
+                            fill_color = "YlOrRd"
                             
                             if indicator_choice == "Densité (hab/km²)":
                                 map_col = "densite"
                                 legend_name = "Densité"
-                            elif indicator_choice == "Revenus (Médiane)":
-                                pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), "Revenus (Médiane)")
+                            elif indicator_choice == "Niveau de vie Médian (€)":
+                                pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), "Niveau de vie Médian (€)")
                                 if pynsee_df is not None and not pynsee_df.empty:
-                                    # On suppose que OBS_VALUE est la médiane si on a bien filtré
-                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'revenu_med', 'CODEGEO': 'code'})
-                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'revenu_med']], on='code', how='left')
-                                    map_col = "revenu_med"
-                                    legend_name = "Revenu Médian (€)"
-                                else:
-                                    st.error("Données de revenus non disponibles via Pynsee.")
+                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'rev_med', 'CODEGEO': 'code'})
+                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'rev_med']], on='code', how='left')
+                                    map_col = "rev_med"
+                                    legend_name = "Niveau de vie Médian (€)"
+                                    fill_color = "YlGn"
+                            elif indicator_choice == "Taux de pauvreté (%)":
+                                pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), "Taux de pauvreté (%)")
+                                if pynsee_df is not None and not pynsee_df.empty:
+                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'pauvreté', 'CODEGEO': 'code'})
+                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'pauvreté']], on='code', how='left')
+                                    map_col = "pauvreté"
+                                    legend_name = "Taux de pauvreté (%)"
+                                    fill_color = "RdPu"
                             elif indicator_choice == "Logement (Rés. Secondaires %)":
                                 pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), "Logement (Rés. Secondaires %)")
                                 if pynsee_df is not None and not pynsee_df.empty:
-                                    # On traite les données RP pour extraire les résidences secondaires
-                                    # Note: nécessite un filtrage plus précis sur les variables
                                     pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'res_sec', 'CODEGEO': 'code'})
                                     gdf_communes = gdf_communes.merge(pynsee_df[['code', 'res_sec']], on='code', how='left')
                                     map_col = "res_sec"
                                     legend_name = "Résidences Secondaires"
                             
-                            # Suppression des lignes avec NaN pour la carte si nécessaire
+                            # Suppression des lignes avec NaN pour la carte
                             gdf_plot = gdf_communes.dropna(subset=[map_col])
                             
                             if not gdf_plot.empty:
@@ -390,7 +403,7 @@ if data:
                                     data=gdf_plot,
                                     columns=["code", map_col],
                                     key_on="feature.properties.code",
-                                    fill_color="YlOrRd",
+                                    fill_color=fill_color,
                                     fill_opacity=0.7,
                                     line_opacity=0.2,
                                     legend_name=legend_name,
