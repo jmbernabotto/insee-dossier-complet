@@ -163,15 +163,71 @@ def get_pynsee_indicators(commune_codes, indicator_type):
         st.warning(f"Erreur Pynsee : {e}")
     return None
 
+@st.cache_data
+def get_filosofi_data(code, kind):
+    """Récupère les données socio-économiques complètes pour le territoire."""
+    # Mapping des niveaux
+    level_map = {
+        "communes": "COM",
+        "EPCI": "EPCI",
+        "intercommunalites": "EPCI",
+        "departements": "DEP",
+        "regions": "REG"
+    }
+    
+    nivgeo = level_map.get(kind)
+    if not nivgeo:
+        return {}
+        
+    stats = {}
+    try:
+        # 1. Données détaillées (Pauvreté, Inégalités)
+        df_det = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
+                                  nivgeo=nivgeo, 
+                                  geocodes=[code],
+                                  variables='INDICS_FILO_DISP_DET')
+        
+        if df_det is not None and not df_det.empty:
+            # Extraction Taux de pauvreté
+            tp60 = df_det[df_det['UNIT'] == 'TP60']
+            if not tp60.empty:
+                stats['Taux de pauvreté (%)'] = tp60.iloc[0]['OBS_VALUE']
+            
+            # Extraction Rapport Interdécile
+            rd = df_det[df_det['UNIT'] == 'RD']
+            if not rd.empty:
+                stats['Rapport Interdécile (D9/D1)'] = rd.iloc[0]['OBS_VALUE']
+                
+            # Extraction Part des revenus d'activité
+            pact = df_det[df_det['UNIT'] == 'PACT']
+            if not pact.empty:
+                stats["Part des revenus d'activité (%)"] = pact.iloc[0]['OBS_VALUE']
+        
+        # 2. Données globales (Médiane)
+        df_glob = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
+                                  nivgeo=nivgeo, 
+                                  geocodes=[code],
+                                  variables='INDICS_FILO_DISP')
+        
+        if df_glob is not None and not df_glob.empty:
+            med = df_glob[df_glob['UNIT'] == 'MEDIANE']
+            if not med.empty:
+                stats['Niveau de vie Médian (€)'] = med.iloc[0]['OBS_VALUE']
+                
+    except Exception as e:
+        print(f"Erreur FILOSOFI pour {code}: {e}")
+        
+    return stats
+
 def get_territory_indicators(code, kind):
     """Récupère des indicateurs clés pour le territoire sélectionné."""
     indicators = {}
     
     # Prefix for INSEE URL
-    # Correction : kind peut être "intercommunalites"
     prefix = "EPCI" if kind in ["EPCI", "intercommunalites"] else ("COM" if kind == "communes" else ("DEP" if kind == "departements" else "REG"))
     indicators['URL Dossier INSEE'] = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{code}"
 
+    # Données géographiques de base
     if kind == "communes":
         try:
             r = requests.get(f"https://geo.api.gouv.fr/communes/{code}?fields=population,surface,codesPostaux,codeDepartement,codeRegion")
@@ -179,23 +235,15 @@ def get_territory_indicators(code, kind):
                 data = r.json()
                 indicators['Population'] = data.get('population')
                 indicators['Surface (ha)'] = data.get('surface')
-                indicators['Codes Postaux'] = ", ".join(data.get('codesPostaux', []))
                 indicators['Code Département'] = data.get('codeDepartement')
-                indicators['Code Région'] = data.get('codeRegion')
-            elif code == "62498":
-                # Fallback pour Lens
-                indicators['Population'] = 32920
-                indicators['Surface (ha)'] = 1170
-                indicators['Codes Postaux'] = "62300"
-                indicators['Code Département'] = "62"
-                indicators['Code Région'] = "32"
         except:
-            if code == "62498":
+            if code == "62498": # Fallback Lens
                 indicators['Population'] = 32920
-                indicators['Surface (ha)'] = 1170
-                indicators['Codes Postaux'] = "62300"
-                indicators['Code Département'] = "62"
-                indicators['Code Région'] = "32"
+    
+    # Intégration des données FILOSOFI riches (Pauvreté, Revenus)
+    # Fonctionne pour Communes, EPCI, Départements
+    filo_stats = get_filosofi_data(code, kind)
+    indicators.update(filo_stats)
     
     return indicators
 
@@ -208,15 +256,15 @@ def ask_gemini(prompt, context_data, territory_name):
     full_prompt = f"""Tu es un expert en démographie et géographie française, spécialisé dans l'analyse des données INSEE.
 Tu assistes un utilisateur qui consulte le dossier de la collectivité : {territory_name}.
 
-Voici les données clés dont tu scratches pour ce territoire :
+Voici les données clés (issues des bases officielles INSEE / FILOSOFI) pour ce territoire :
 {context_str}
 
 L'utilisateur demande : {prompt}
 
 Instructions :
-1. Utilise les données fournies ci-dessus en priorité.
+1. Utilise les données chiffrées fournies ci-dessus (Pauvreté, Niveau de vie, Population) en priorité absolue.
 2. Si tu n'as pas de réponse à la question (que ce soit via les données fournies ou tes connaissances générales), réponds exactement : "je ne peux répondre à votre question".
-3. Si la question porte sur des détails non présents (ex: taux de chômage, pyramide des âges), mentionne que ces informations sont disponibles dans le "Dossier complet" via l'URL fournie, mais si tu ne peux apporter aucune information utile, utilise la phrase : "je ne peux répondre à votre question".
+3. Analyse les indicateurs de pauvreté et de niveau de vie pour donner un contexte social précis.
 4. Donne des réponses précises, analytiques et polies.
 """
 
