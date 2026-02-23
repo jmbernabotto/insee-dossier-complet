@@ -263,9 +263,10 @@ L'utilisateur demande : {prompt}
 
 Instructions :
 1. Utilise les données chiffrées fournies ci-dessus (Pauvreté, Niveau de vie, Population) en priorité absolue.
-2. Si tu n'as pas de réponse à la question (que ce soit via les données fournies ou tes connaissances générales), réponds exactement : "je ne peux répondre à votre question".
-3. Analyse les indicateurs de pauvreté et de niveau de vie pour donner un contexte social précis.
-4. Donne des réponses précises, analytiques et polies.
+2. Si la question porte sur une précision géographique très fine (quartier, rue, carreaux de 200m), mentionne que l'utilisateur peut consulter la "Carte interactive (Carroyage 200m)" via le bouton dédié pour visualiser les données à l'échelle infra-communale.
+3. Si tu n'as pas de réponse à la question (que ce soit via les données fournies ou tes connaissances générales), réponds exactement : "je ne peux répondre à votre question".
+4. Analyse les indicateurs de pauvreté et de niveau de vie pour donner un contexte social précis.
+5. Donne des réponses précises, analytiques et polies.
 """
 
     try:
@@ -356,7 +357,8 @@ if data:
                     url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
                     
                     st.link_button("📄 Voir le dossier complet", url_insee, use_container_width=True)
-                    st.caption("💡 Cliquez sur le bouton puis sur **Imprimer** en haut du dossier et choisir le format PDF.")
+                    st.link_button("🗺️ Carte interactive (Carroyage 200m)", "https://www.insee.fr/fr/outil-interactif/7737357/map.html", use_container_width=True)
+                    st.caption("💡 Cliquez sur le bouton **Imprimer** en haut du dossier pour le format PDF.")
                 
                 gdf_main = get_geo(row['CODE'], type_col, row['TITLE'])
                 if gdf_main is not None:
