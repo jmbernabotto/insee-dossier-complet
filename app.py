@@ -356,9 +356,14 @@ if data:
                     prefix = "EPCI" if type_col in ["EPCI", "intercommunalites"] else ("COM" if type_col == "communes" else ("DEP" if type_col == "departements" else "REG"))
                     url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
                     
+                    # Construction du lien Statistiques Locales pour centrage automatique
+                    # nivgeo: com, epci, dep, reg
+                    nivgeo_param = "com" if type_col == "communes" else ("epci" if type_col in ["EPCI", "intercommunalites"] else ("dep" if type_col == "departements" else "reg"))
+                    url_stats_locales = f"https://statistiques-locales.insee.fr/#c=report&selcodgeo={row['CODE']}&nivgeo={nivgeo_param}"
+                    
                     st.link_button("📄 Voir le dossier complet", url_insee, use_container_width=True)
-                    st.link_button("🗺️ Carte interactive (Carroyage 200m)", "https://www.insee.fr/fr/outil-interactif/7737357/map.html", use_container_width=True)
-                    st.caption("💡 Cliquez sur le bouton **Imprimer** en haut du dossier pour le format PDF.")
+                    st.link_button("🗺️ Carte interactive (Centrage auto)", url_stats_locales, use_container_width=True)
+                    st.caption("💡 Le lien 🗺️ ouvre l'outil de cartographie centré sur votre territoire.")
                 
                 gdf_main = get_geo(row['CODE'], type_col, row['TITLE'])
                 if gdf_main is not None:
