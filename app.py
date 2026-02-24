@@ -136,35 +136,47 @@ def get_pynsee_indicators(commune_codes, indicator_type):
     """Récupère des indicateurs pynsee pour une liste de communes."""
     try:
         # FILOSOFI Indicators
-        if indicator_type == "Niveau de vie Médian (€)":
-            df = pynsee.get_local_data(dataset_version='GEO2021FILO2018', nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP')
-            return df[df['UNIT'] == 'MEDIANE'] if df is not None else None
-        elif indicator_type == "Taux de pauvreté (%)":
-            df = pynsee.get_local_data(dataset_version='GEO2021FILO2018', nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP_DET')
-            return df[df['UNIT'] == 'TP60'] if df is not None else None
+        if "Filosofi" in indicator_type or indicator_type in ["Niveau de vie des individus (€)", "Nombre d'individus au sens fiscal", "Part des ménages pauvres (%)"]:
+            ds = 'GEO2021FILO2018'
+            if indicator_type == "Niveau de vie des individus (€)":
+                df = pynsee.get_local_data(dataset_version=ds, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP')
+                return df[df['UNIT'] == 'MEDIANE'] if df is not None else None
+            elif indicator_type == "Nombre d'individus au sens fiscal":
+                df = pynsee.get_local_data(dataset_version=ds, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP')
+                return df[df['UNIT'] == 'NBPERS'] if df is not None else None
+            elif indicator_type == "Part des ménages pauvres (%)":
+                df = pynsee.get_local_data(dataset_version=ds, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP_DET')
+                return df[df['UNIT'] == 'TP60'] if df is not None else None
+            # On peut ajouter d'autres filtres FILO ici
             
-        # CENSUS (RP) Indicators
-        elif indicator_type == "Population Homme":
-            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='SEXE')
+        # CENSUS (RP) Indicators - Using GEO2021RP2018 which is reliable
+        ds_rp = 'GEO2021RP2018'
+        
+        # Mapping des nouveaux indicateurs RP
+        if indicator_type == "Population municipale (homme)":
+            df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables='SEXE')
+            return df[df['SEXE'] == '1'] if df is not None else None
+        elif indicator_type == "Population municipale (femme)":
+            df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables='SEXE')
+            return df[df['SEXE'] == '2'] if df is not None else None
+        elif "étrangère" in indicator_type:
+            df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables='NAT1')
+            return df[df['NAT1'] == '2'] if df is not None else None
+        elif "résidences principales (%)" in indicator_type:
+            df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables='STOCD')
+            return df[df['STOCD'] == '10'] if df is not None else None
+        elif indicator_type == "Part des couples avec enfants (%)":
+            df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables='TYPFC')
+            return df[df['TYPFC'] == '2'] if df is not None else None
+            
+        # Fallback pour les indicateurs déjà implémentés
+        if indicator_type == "Population Homme":
+            df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables='SEXE')
             return df[df['SEXE'] == '1'] if df is not None else None
         elif indicator_type == "Population Femme":
-            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='SEXE')
+            df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables='SEXE')
             return df[df['SEXE'] == '2'] if df is not None else None
-        elif indicator_type == "Part des résidences principales (%)":
-            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='LOGEMENT')
-            return df[df['LOGEMENT'] == 'RPRINC20'] if df is not None else None
-        elif indicator_type == "Logement (Rés. Secondaires %)":
-            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='LOGEMENT')
-            return df[df['LOGEMENT'] == 'RSECO20'] if df is not None else None
-        elif indicator_type == "Part des couples avec enfants (%)":
-            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='COUPLE_ENFANT')
-            return df[df['COUPLE_ENFANT'] == 'COUP_ENF'] if df is not None else None
-        elif indicator_type == "Part Hommes Actifs (15-64 ans)":
-            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='ACT_SEXE')
-            return df[df['ACT_SEXE'] == 'ACT1564_H'] if df is not None else None
-        elif indicator_type == "Part Femmes Actives (15-64 ans)":
-            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='ACT_SEXE')
-            return df[df['ACT_SEXE'] == 'ACT1564_F'] if df is not None else None
+            
     except Exception as e:
         st.warning(f"Erreur Pynsee ({indicator_type}) : {e}")
     return None
@@ -413,91 +425,126 @@ if data:
             with tab2:
                 if type_col in ["communes"]:
                     st.info("Sélectionnez un EPCI ou un Département pour voir la carte communale détaillée.")
+            with tab2:
+                if type_col in ["communes"]:
+                    st.info("Sélectionnez un EPCI ou un Département pour voir la carte communale détaillée.")
                 else:
                     st.subheader(f"Carte des communes de : {row['TITLE']}")
                     
-                    indicator_list = [
-                        "Population", "Densité (hab/km²)", "Niveau de vie des individus", 
-                        "Part des ménages pauvres (%)", "Population Homme", "Population Femme",
-                        "Part des résidences principales (%)", "Logement (Rés. Secondaires %)",
-                        "Part des couples avec enfants (%)", "Part Hommes Actifs (15-64 ans)",
-                        "Part Femmes Actives (15-64 ans)"
-                    ]
+                    # Configuration des indicateurs hiérarchisés
+                    INDICATORS_CONFIG = {
+                        "Recensement de la population 2022 (Iris)": [
+                            "Densité de population (hab/km²)",
+                            "Indice de jeunesse",
+                            "Part de la population étrangère (%)",
+                            "Part des résidences principales (%)",
+                            "Part des appartements parmi les résidences principales (%)",
+                            "Part des ménages ayant emménagé depuis moins de 2 ans (%)",
+                            "Part des 15 ans ou plus non scolarisés étant diplômés du supérieur (%)",
+                            "Part des 15 ans ou plus non scolarisés sans diplôme ou avec au plus le CEP (%)",
+                            "Part des familles monoparentales (%)",
+                            "Part des couples avec enfants (%)",
+                            "Part des actifs occupés de 15 ans ou plus utilisant la marche ou le vélo (%)",
+                            "Part des actifs occupés de 15 ans ou plus utilisant les transports en commun (%)",
+                            "Part des hommes actifs de 15 à 64 ans (%)",
+                            "Part des femmes actives de 15 à 64 ans (%)",
+                            "Part des hommes salariés de 15 ans ou plus à temps partiel (%)",
+                            "Part des femmes salariées de 15 ans ou plus à temps partiel (%)"
+                        ],
+                        "Filosofi 2021 (carreau 200m et 1km)": [
+                            "Niveau de vie des individus (€)",
+                            "Nombre d'individus au sens fiscal",
+                            "Part des familles monoparentales (%) (Filo)",
+                            "Part des logements sociaux (%)",
+                            "Part des ménages pauvres (%)",
+                            "Part des ménages propriétaires (%)",
+                            "Part des ménages d'une seule personne (%)",
+                            "Part des ménages de 5 personnes ou plus (%)",
+                            "Part des personnes âgées de moins de 18 ans (%)",
+                            "Part des personnes âgées de 65 ans ou plus (%)",
+                            "Surface moyenne des logements (m²)"
+                        ],
+                        "Recensement de la population 2021 (carreau 1km)": [
+                            "Population municipale",
+                            "Population municipale (femme)",
+                            "Population municipale (homme)",
+                            "Part de la population âgée de moins de 15 ans (%)",
+                            "Part de la population âgée de 65 ans ou plus (%)",
+                            "Part de la population née en France (%)",
+                            "Part de la population née dans un pays de l'UE autre que la France (%)",
+                            "Part de la population née dans un pays hors de l'UE (%)",
+                            "Part de la population résidant un an auparavant ailleurs en France (%)",
+                            "Part de la population résidant un an auparavant à l'extérieur de la France (%)"
+                        ]
+                    }
                     
-                    indicator_choice = st.selectbox("Indicateur à afficher", indicator_list)
+                    cat_choice = st.selectbox("Catégorie", list(INDICATORS_CONFIG.keys()))
+                    indicator_choice = st.selectbox("Indicateur à afficher", INDICATORS_CONFIG[cat_choice])
                     
                     with st.spinner("Chargement des données géographiques et statistiques..."):
                         gdf_communes = get_communes_of_territory(row['CODE'], type_col)
                         
                         if gdf_communes is not None:
-                            map_col = "population"
-                            legend_name = "Population"
+                            map_col = None
+                            legend_name = indicator_choice
                             fill_color = "YlOrRd"
                             
-                            # Logique de sélection d'indicateur
-                            if indicator_choice == "Densité (hab/km²)":
+                            # Logique de récupération des données
+                            if indicator_choice == "Densité de population (hab/km²)":
                                 map_col = "densite"
                                 legend_name = "Densité"
-                            elif indicator_choice == "Niveau de vie des individus":
-                                pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), "Niveau de vie Médian (€)")
-                                if pynsee_df is not None and not pynsee_df.empty:
-                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'rev_med', 'CODEGEO': 'code'})
-                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'rev_med']], on='code', how='left')
-                                    map_col = "rev_med"
-                                    legend_name = "Niveau de vie médian (€)"
-                                    fill_color = "YlGn"
-                            elif indicator_choice == "Part des ménages pauvres (%)":
-                                pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), "Taux de pauvreté (%)")
-                                if pynsee_df is not None and not pynsee_df.empty:
-                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'pauvrete', 'CODEGEO': 'code'})
-                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'pauvrete']], on='code', how='left')
-                                    map_col = "pauvrete"
-                                    legend_name = "Taux de pauvreté (%)"
-                                    fill_color = "RdPu"
-                            elif indicator_choice in ["Population Homme", "Population Femme", "Part des résidences principales (%)", 
-                                                    "Logement (Rés. Secondaires %)", "Part des couples avec enfants (%)", 
-                                                    "Part Hommes Actifs (15-64 ans)", "Part Femmes Actives (15-64 ans)"]:
+                            elif indicator_choice == "Population municipale":
+                                map_col = "population"
+                            else:
                                 pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), indicator_choice)
                                 if pynsee_df is not None and not pynsee_df.empty:
-                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'val_rp', 'CODEGEO': 'code'})
-                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'val_rp']], on='code', how='left')
-                                    map_col = "val_rp"
-                                    legend_name = indicator_choice
+                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'val_pynsee', 'CODEGEO': 'code'})
+                                    # Gestion des doublons potentiels
+                                    pynsee_df = pynsee_df.drop_duplicates(subset=['code'])
+                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'val_pynsee']], on='code', how='left')
+                                    map_col = "val_pynsee"
+                                    
+                                    # Couleurs personnalisées selon l'indicateur
+                                    if "Niveau de vie" in indicator_choice: fill_color = "YlGn"
+                                    elif "pauvres" in indicator_choice: fill_color = "RdPu"
                             
-                            # Suppression des lignes avec NaN pour la carte
-                            gdf_plot = gdf_communes.dropna(subset=[map_col])
-                            
-                            if not gdf_plot.empty:
-                                center_c = gdf_plot.to_crs(epsg=3857).centroid.to_crs(epsg=4326).unary_union.centroid
-                                m_choroplet = folium.Map(location=[center_c.y, center_c.x], zoom_start=9)
+                            if map_col:
+                                # Suppression des lignes avec NaN pour la carte
+                                gdf_plot = gdf_communes.dropna(subset=[map_col])
                                 
-                                folium.Choropleth(
-                                    geo_data=gdf_plot.to_json(),
-                                    name="choropleth",
-                                    data=gdf_plot,
-                                    columns=["code", map_col],
-                                    key_on="feature.properties.code",
-                                    fill_color=fill_color,
-                                    fill_opacity=0.7,
-                                    line_opacity=0.2,
-                                    legend_name=legend_name,
-                                ).add_to(m_choroplet)
-                                
-                                tooltip = folium.features.GeoJson(
-                                    gdf_plot.to_json(),
-                                    style_function=lambda x: {'fillColor': '#ffffff', 'color':'#000000', 'fillOpacity': 0.1, 'weight': 0.1},
-                                    control=False,
-                                    highlight_function=lambda x: {'fillColor': '#000000', 'color':'#000000', 'fillOpacity': 0.5, 'weight': 0.1},
-                                    tooltip=folium.features.GeoJsonTooltip(
-                                        fields=['nom', 'code', map_col],
-                                        aliases=['Commune: ', 'Code: ', f'{legend_name}: '],
-                                        style=("background-color: white; color: #333333; font-family: arial; font-size: 12px; padding: 10px;")
+                                if not gdf_plot.empty:
+                                    center_c = gdf_plot.to_crs(epsg=3857).centroid.to_crs(epsg=4326).unary_union.centroid
+                                    m_choroplet = folium.Map(location=[center_c.y, center_c.x], zoom_start=9)
+                                    
+                                    folium.Choropleth(
+                                        geo_data=gdf_plot.to_json(),
+                                        name="choropleth",
+                                        data=gdf_plot,
+                                        columns=["code", map_col],
+                                        key_on="feature.properties.code",
+                                        fill_color=fill_color,
+                                        fill_opacity=0.7,
+                                        line_opacity=0.2,
+                                        legend_name=legend_name,
+                                    ).add_to(m_choroplet)
+                                    
+                                    tooltip = folium.features.GeoJson(
+                                        gdf_plot.to_json(),
+                                        style_function=lambda x: {'fillColor': '#ffffff', 'color':'#000000', 'fillOpacity': 0.1, 'weight': 0.1},
+                                        control=False,
+                                        highlight_function=lambda x: {'fillColor': '#000000', 'color':'#000000', 'fillOpacity': 0.5, 'weight': 0.1},
+                                        tooltip=folium.features.GeoJsonTooltip(
+                                            fields=['nom', 'code', map_col],
+                                            aliases=['Commune: ', 'Code: ', f'{legend_name}: '],
+                                            style=("background-color: white; color: #333333; font-family: arial; font-size: 12px; padding: 10px;")
+                                        )
                                     )
-                                )
-                                m_choroplet.add_child(tooltip)
-                                st_folium(m_choroplet, width=1000, height=600, key="map_choropleth")
+                                    m_choroplet.add_child(tooltip)
+                                    st_folium(m_choroplet, width=1000, height=600, key="map_choropleth")
+                                else:
+                                    st.warning("Aucune donnée à afficher pour cet indicateur.")
                             else:
-                                st.warning("Aucune donnée à afficher pour cet indicateur.")
+                                st.info("Chargement des données en cours...")
                         else:
                             st.error("Impossible de charger les données communales.")
 
