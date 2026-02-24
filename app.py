@@ -138,59 +138,71 @@ def get_pynsee_indicators(commune_codes, indicator_type):
         ds_filo = 'GEO2021FILO2018'
         ds_rp = 'GEO2021RP2018'
         
-        # --- FILOSOFI ---
-        if "Filosofi" in indicator_type or indicator_type in ["Niveau de vie des individus (€)", "Nombre d'individus au sens fiscal", "Part des ménages pauvres (%)"]:
-            if indicator_type == "Niveau de vie des individus (€)":
-                df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP')
-                return df[df['UNIT'] == 'MEDIANE'] if df is not None else None
-            elif indicator_type == "Nombre d'individus au sens fiscal":
-                df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP')
-                return df[df['UNIT'] == 'NBPERS'] if df is not None else None
-            elif indicator_type == "Part des ménages pauvres (%)":
-                df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP_DET')
-                return df[df['UNIT'] == 'TP60'] if df is not None else None
-            
+        # --- FILOSOFI (Revenus / Pauvreté) ---
+        if indicator_type == "Niveau de vie des individus (€)":
+            df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP')
+            return df[df['UNIT'] == 'MEDIANE'] if df is not None else None
+        elif indicator_type == "Nombre d'individus au sens fiscal":
+            df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP')
+            return df[df['UNIT'] == 'NBPERS'] if df is not None else None
+        elif indicator_type == "Part des ménages pauvres (%)":
+            df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP_DET')
+            return df[df['UNIT'] == 'TP60'] if df is not None else None
+        elif indicator_type == "Part des logements sociaux (%)":
+            df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP_DET-OCCTYPR')
+            # Variable indicative
+            return df if df is not None else None
+
         # --- RECENSEMENT (RP) ---
-        # 1. Population Municipale (Source POPLEG)
-        if "Population municipale" in indicator_type:
+        # Population Municipale (Source POPLEG)
+        if indicator_type.startswith("Population municipale"):
             df = pynsee.get_local_data(dataset_version='POPLEG2018', nivgeo='COM', geocodes=commune_codes, variables='IND_POPLEGALES')
-            if df is not None:
+            if df is not None and not df.empty:
                 if "(homme)" in indicator_type or "(femme)" in indicator_type:
-                    # Proxy via RP 2011 pour la repartition par sexe (plus stable sur les noms de colonnes)
+                    # Proxy via RP 2011 (Sexe disponible)
                     df_sex = pynsee.get_local_data(dataset_version='GEO2019RP2011', nivgeo='COM', geocodes=commune_codes, variables='SEXE-AGE15_15_90')
                     if df_sex is not None:
                         sex_code = '1' if '(homme)' in indicator_type else '2'
-                        df_sex = df_sex.groupby(['CODEGEO', 'SEXE'])['OBS_VALUE'].sum().reset_index()
-                        return df_sex[df_sex['SEXE'] == sex_code].rename(columns={'OBS_VALUE': 'OBS_VALUE_SEX'})
+                        df_res = df_sex.groupby(['CODEGEO', 'SEXE'])['OBS_VALUE'].sum().reset_index()
+                        return df_res[df_res['SEXE'] == sex_code].rename(columns={'OBS_VALUE': 'OBS_VALUE_SEX'})
                 return df[df['UNIT'] == 'POPMUN']
 
-        # 2. Indicateurs Iris / Thématiques (RP 2018)
-        if indicator_type == "Densité de population (hab/km²)":
-            return None # Géré dans la vue (calculé)
-            
-        elif indicator_type == "Indice de jeunesse":
-            # Ratio Pop < 20 / Pop >= 60. On utilise TF4 qui est très stable.
-            df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables='TF4')
-            # Note: TF4 donne le type de famille, pas l'age direct de toute la pop.
-            # Pour un indice de jeunesse reel, il faut AGEMEN.
-            df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables='AGEFOR5-TF4')
+        # Indicateurs Thématiques (RP 2018)
+        mapping_rp = {
+            "Part des résidences principales (%)": ("STOCD", "10"),
+            "Part des appartements parmi les résidences principales (%)": ("TYPLR-CATL", "2"),
+            "Part des couples avec enfants (%)": ("TF4", "2"),
+            "Part des familles monoparentales (%)": ("TF4", "4"),
+            "Part de la population étrangère (%)": ("NAT1", "2"),
+            "Part des hommes actifs de 15 à 64 ans (%)": ("TACTR", "11"),
+            "Part des femmes actives de 15 à 64 ans (%)": ("TACTR", "11"), # Nécessite filtre SEXE
+            "Part des actifs occupés de 15 ans ou plus utilisant la marche ou le vélo (%)": ("TRANS_19", "1"),
+        }
+
+        if indicator_type in mapping_rp:
+            var, code = mapping_rp[indicator_type]
+            df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables=var)
+            if df is not None and not df.empty:
+                # Si la variable contient le code dans une colonne du même nom
+                if var in df.columns:
+                    return df[df[var] == code]
+                return df
+
+        # Calculs spécifiques
+        if indicator_type == "Indice de jeunesse":
+            df = pynsee.get_local_data(dataset_version='GEO2019RP2011', nivgeo='COM', geocodes=commune_codes, variables='SEXE-AGE15_15_90')
             if df is not None:
-                # AGEFOR5: 00 (0-14), 15 (15-24)...
-                df['is_young'] = df['AGEFOR5'].isin(['00', '15'])
-                res = df.groupby('CODEGEO').apply(lambda x: x[x['is_young']]['OBS_VALUE'].sum()).reset_index()
+                # AGE15_15_90 : tranches de 15 ans
+                df['is_young'] = df['AGE15_15_90'].isin(['00', '15'])
+                df['is_old'] = df['AGE15_15_90'].isin(['60', '75', '90'])
+                res = df.groupby('CODEGEO').apply(
+                    lambda x: x[x['is_young']]['OBS_VALUE'].sum() / x[x['is_old']]['OBS_VALUE'].sum() if x[x['is_old']]['OBS_VALUE'].sum() > 0 else 0
+                ).reset_index()
                 res.columns = ['CODEGEO', 'OBS_VALUE']
                 return res
 
-        elif "résidences principales (%)" in indicator_type:
-            df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables='STOCD')
-            return df[df['STOCD'] == '10'] if df is not None else None
-
-        elif "couples avec enfants" in indicator_type:
-            df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables='TF4')
-            return df[df['TF4'] == '2'] if df is not None else None
-
     except Exception as e:
-        st.error(f"Erreur Pynsee ({indicator_type}) : {e}")
+        print(f"DEBUG: Erreur Pynsee pour {indicator_type}: {e}")
     return None
 
 @st.cache_data
