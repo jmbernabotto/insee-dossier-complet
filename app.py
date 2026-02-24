@@ -181,9 +181,12 @@ def get_pynsee_indicators(commune_codes, indicator_type):
             "Part des actifs occupés de 15 ans ou plus utilisant la marche ou le vélo (%)": ("TRANS_19", "1"),
             "Part des actifs occupés de 15 ans ou plus utilisant les transports en commun (%)": ("TRANS_19", "2"),
             "Surface moyenne des logements (m²)": ("SURF_15-CS1_8-TYPLR", "ENS"),
-            "Part des ménages propriétaires (%)": ("STOCD", "10"), # A affiner si besoin
+            "Part des ménages propriétaires (%)": ("STOCD", "10"),
             "Part des ménages d'une seule personne (%)": ("TYPMR", "1"),
             "Part des ménages de 5 personnes ou plus (%)": ("NPERC-NBPIR-TYPLR", "5"),
+            "Part de la population âgée de moins de 15 ans (%)": ("AGEFOR5-TF4", "00"),
+            "Part de la population âgée de 65 ans ou plus (%)": ("AGEMEN8_A", "65"),
+            "Part de la population née en France (%)": ("NAT1", "1"),
         }
 
         if indicator_type in mapping_rp:
@@ -192,12 +195,22 @@ def get_pynsee_indicators(commune_codes, indicator_type):
             if df is not None and not df.empty:
                 # Filtrage spécifique pour la surface (on prend la moyenne ENS)
                 if indicator_type == "Surface moyenne des logements (m²)":
-                    # On prend l'ensemble des logements et on peut faire une approximation ou prendre la valeur ENS si dispo
                     return df[(df['SURF_15'] == 'ENS') & (df['CS1_8'] == 'ENS') & (df['TYPLR'] == 'ENS')]
                 
+                # Filtrage par sexe pour les actifs si nécessaire
+                if "femmes actives" in indicator_type.lower() and "SEXE" in df.columns:
+                    df = df[df['SEXE'] == '2']
+                elif "hommes actifs" in indicator_type.lower() and "SEXE" in df.columns:
+                    df = df[df['SEXE'] == '1']
+
                 # Filtrage standard
                 if var in df.columns:
                     return df[df[var] == code]
+                
+                # Fallback multi-colonne (variables composées)
+                for col in df.columns:
+                    if col.startswith(var.split('-')[0]):
+                        return df[df[col] == code]
                 return df
 
         # Calculs spécifiques
