@@ -109,7 +109,7 @@ def get_geo(code, kind, name):
 
 @st.cache_data
 def get_communes_of_territory(parent_code, parent_kind):
-    """Récupère toutes les communes d'un territoire parent (EPCI ou Département)."""
+    """Récupère toutes les communes d'un territoire parent avec simplification des contours."""
     if parent_kind == "departements":
         url = f"https://geo.api.gouv.fr/departements/{parent_code}/communes?format=geojson&geometry=contour&fields=nom,code,population"
     elif parent_kind in ["EPCI", "intercommunalites"]:
@@ -123,7 +123,9 @@ def get_communes_of_territory(parent_code, parent_kind):
             data = r.json()
             if data.get('features'):
                 gdf = gpd.GeoDataFrame.from_features(data['features'], crs="EPSG:4326")
-                # Calcul de la densité si possible
+                # Simplification des contours pour la performance (0.001 deg ~ 100m)
+                gdf['geometry'] = gdf['geometry'].simplify(0.001, preserve_topology=True)
+                # Calcul de la densité
                 gdf['area_km2'] = gdf.to_crs(epsg=3857).area / 10**6
                 gdf['densite'] = gdf['population'] / gdf['area_km2']
                 return gdf
@@ -555,11 +557,18 @@ if data:
                                 gdf_plot = gdf_communes.dropna(subset=[map_col])
                                 
                                 if not gdf_plot.empty:
-                                    center_c = gdf_plot.to_crs(epsg=3857).centroid.to_crs(epsg=4326).unary_union.centroid
-                                    m_choroplet = folium.Map(location=[center_c.y, center_c.x], zoom_start=9)
+                                    # Optimisation du centrage : on prend les limites globales
+                                    bounds = gdf_plot.total_bounds
+                                    center_lat = (bounds[1] + bounds[3]) / 2
+                                    center_lon = (bounds[0] + bounds[2]) / 2
+                                    
+                                    m_choroplet = folium.Map(location=[center_lat, center_lon], zoom_start=9)
+                                    
+                                    # Export JSON une seule fois
+                                    geojson_data = gdf_plot.to_json()
                                     
                                     folium.Choropleth(
-                                        geo_data=gdf_plot.to_json(),
+                                        geo_data=geojson_data,
                                         name="choropleth",
                                         data=gdf_plot,
                                         columns=["code", map_col],
@@ -571,7 +580,7 @@ if data:
                                     ).add_to(m_choroplet)
                                     
                                     tooltip = folium.features.GeoJson(
-                                        gdf_plot.to_json(),
+                                        geojson_data,
                                         style_function=lambda x: {'fillColor': '#ffffff', 'color':'#000000', 'fillOpacity': 0.1, 'weight': 0.1},
                                         control=False,
                                         highlight_function=lambda x: {'fillColor': '#000000', 'color':'#000000', 'fillOpacity': 0.5, 'weight': 0.1},
@@ -582,7 +591,7 @@ if data:
                                         )
                                     )
                                     m_choroplet.add_child(tooltip)
-                                    status.update(label="✅ Analyse cartographique terminée !", state="complete")
+                                    status.update(label="✅ Analyse cartographique prête !", state="complete")
                                     st_folium(m_choroplet, width=1000, height=600, key="map_choropleth")
                                 else:
                                     status.update(label="⚠️ Aucune donnée statistique exploitable.", state="error")
