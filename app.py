@@ -175,15 +175,25 @@ def get_pynsee_indicators(commune_codes, indicator_type):
             "Part des familles monoparentales (%)": ("TF4", "4"),
             "Part de la population étrangère (%)": ("NAT1", "2"),
             "Part des hommes actifs de 15 à 64 ans (%)": ("TACTR", "11"),
-            "Part des femmes actives de 15 à 64 ans (%)": ("TACTR", "11"), # Nécessite filtre SEXE
+            "Part des femmes actives de 15 à 64 ans (%)": ("TACTR", "11"),
             "Part des actifs occupés de 15 ans ou plus utilisant la marche ou le vélo (%)": ("TRANS_19", "1"),
+            "Part des actifs occupés de 15 ans ou plus utilisant les transports en commun (%)": ("TRANS_19", "2"),
+            "Surface moyenne des logements (m²)": ("SURF_15-CS1_8-TYPLR", "ENS"),
+            "Part des ménages propriétaires (%)": ("STOCD", "10"), # A affiner si besoin
+            "Part des ménages d'une seule personne (%)": ("TYPMR", "1"),
+            "Part des ménages de 5 personnes ou plus (%)": ("NPERC-NBPIR-TYPLR", "5"),
         }
 
         if indicator_type in mapping_rp:
             var, code = mapping_rp[indicator_type]
             df = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables=var)
             if df is not None and not df.empty:
-                # Si la variable contient le code dans une colonne du même nom
+                # Filtrage spécifique pour la surface (on prend la moyenne ENS)
+                if indicator_type == "Surface moyenne des logements (m²)":
+                    # On prend l'ensemble des logements et on peut faire une approximation ou prendre la valeur ENS si dispo
+                    return df[(df['SURF_15'] == 'ENS') & (df['CS1_8'] == 'ENS') & (df['TYPLR'] == 'ENS')]
+                
+                # Filtrage standard
                 if var in df.columns:
                     return df[df[var] == code]
                 return df
