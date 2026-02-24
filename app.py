@@ -135,32 +135,38 @@ def get_communes_of_territory(parent_code, parent_kind):
 def get_pynsee_indicators(commune_codes, indicator_type):
     """Récupère des indicateurs pynsee pour une liste de communes."""
     try:
+        # FILOSOFI Indicators
         if indicator_type == "Niveau de vie Médian (€)":
-            df = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
-                                      nivgeo='COM', 
-                                      geocodes=commune_codes,
-                                      variables='INDICS_FILO_DISP')
-            if df is not None and 'UNIT' in df.columns:
-                df = df[df['UNIT'] == 'MEDIANE']
-            return df
+            df = pynsee.get_local_data(dataset_version='GEO2021FILO2018', nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP')
+            return df[df['UNIT'] == 'MEDIANE'] if df is not None else None
         elif indicator_type == "Taux de pauvreté (%)":
-            df = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
-                                      nivgeo='COM', 
-                                      geocodes=commune_codes,
-                                      variables='INDICS_FILO_DISP_DET')
-            if df is not None and 'UNIT' in df.columns:
-                df = df[df['UNIT'] == 'TP60']
-            return df
+            df = pynsee.get_local_data(dataset_version='GEO2021FILO2018', nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP_DET')
+            return df[df['UNIT'] == 'TP60'] if df is not None else None
+            
+        # CENSUS (RP) Indicators
+        elif indicator_type == "Population Homme":
+            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='SEXE')
+            return df[df['SEXE'] == '1'] if df is not None else None
+        elif indicator_type == "Population Femme":
+            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='SEXE')
+            return df[df['SEXE'] == '2'] if df is not None else None
+        elif indicator_type == "Part des résidences principales (%)":
+            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='LOGEMENT')
+            return df[df['LOGEMENT'] == 'RPRINC20'] if df is not None else None
         elif indicator_type == "Logement (Rés. Secondaires %)":
-            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', 
-                                      nivgeo='COM', 
-                                      geocodes=commune_codes,
-                                      variables='LOGEMENT')
-            if df is not None and 'LOGEMENT' in df.columns:
-                df = df[df['LOGEMENT'] == 'RSECO20']
-            return df
+            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='LOGEMENT')
+            return df[df['LOGEMENT'] == 'RSECO20'] if df is not None else None
+        elif indicator_type == "Part des couples avec enfants (%)":
+            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='COUPLE_ENFANT')
+            return df[df['COUPLE_ENFANT'] == 'COUP_ENF'] if df is not None else None
+        elif indicator_type == "Part Hommes Actifs (15-64 ans)":
+            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='ACT_SEXE')
+            return df[df['ACT_SEXE'] == 'ACT1564_H'] if df is not None else None
+        elif indicator_type == "Part Femmes Actives (15-64 ans)":
+            df = pynsee.get_local_data(dataset_version='GEO2023RP2020', nivgeo='COM', geocodes=commune_codes, variables='ACT_SEXE')
+            return df[df['ACT_SEXE'] == 'ACT1564_F'] if df is not None else None
     except Exception as e:
-        st.warning(f"Erreur Pynsee : {e}")
+        st.warning(f"Erreur Pynsee ({indicator_type}) : {e}")
     return None
 
 @st.cache_data
@@ -410,8 +416,15 @@ if data:
                 else:
                     st.subheader(f"Carte des communes de : {row['TITLE']}")
                     
-                    indicator_choice = st.selectbox("Indicateur à afficher", 
-                                                   ["Population", "Densité (hab/km²)", "Niveau de vie des individus", "Part des ménages pauvres (%)", "Logement (Rés. Secondaires %)"])
+                    indicator_list = [
+                        "Population", "Densité (hab/km²)", "Niveau de vie des individus", 
+                        "Part des ménages pauvres (%)", "Population Homme", "Population Femme",
+                        "Part des résidences principales (%)", "Logement (Rés. Secondaires %)",
+                        "Part des couples avec enfants (%)", "Part Hommes Actifs (15-64 ans)",
+                        "Part Femmes Actives (15-64 ans)"
+                    ]
+                    
+                    indicator_choice = st.selectbox("Indicateur à afficher", indicator_list)
                     
                     with st.spinner("Chargement des données géographiques et statistiques..."):
                         gdf_communes = get_communes_of_territory(row['CODE'], type_col)
@@ -421,6 +434,7 @@ if data:
                             legend_name = "Population"
                             fill_color = "YlOrRd"
                             
+                            # Logique de sélection d'indicateur
                             if indicator_choice == "Densité (hab/km²)":
                                 map_col = "densite"
                                 legend_name = "Densité"
@@ -440,13 +454,15 @@ if data:
                                     map_col = "pauvrete"
                                     legend_name = "Taux de pauvreté (%)"
                                     fill_color = "RdPu"
-                            elif indicator_choice == "Logement (Rés. Secondaires %)":
-                                pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), "Logement (Rés. Secondaires %)")
+                            elif indicator_choice in ["Population Homme", "Population Femme", "Part des résidences principales (%)", 
+                                                    "Logement (Rés. Secondaires %)", "Part des couples avec enfants (%)", 
+                                                    "Part Hommes Actifs (15-64 ans)", "Part Femmes Actives (15-64 ans)"]:
+                                pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), indicator_choice)
                                 if pynsee_df is not None and not pynsee_df.empty:
-                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'res_sec', 'CODEGEO': 'code'})
-                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'res_sec']], on='code', how='left')
-                                    map_col = "res_sec"
-                                    legend_name = "Résidences Secondaires"
+                                    pynsee_df = pynsee_df.rename(columns={'OBS_VALUE': 'val_rp', 'CODEGEO': 'code'})
+                                    gdf_communes = gdf_communes.merge(pynsee_df[['code', 'val_rp']], on='code', how='left')
+                                    map_col = "val_rp"
+                                    legend_name = indicator_choice
                             
                             # Suppression des lignes avec NaN pour la carte
                             gdf_plot = gdf_communes.dropna(subset=[map_col])
