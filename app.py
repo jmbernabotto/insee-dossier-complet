@@ -502,10 +502,15 @@ if data:
                     cat_choice = st.selectbox("Catégorie", list(INDICATORS_CONFIG.keys()))
                     indicator_choice = st.selectbox("Indicateur à afficher", INDICATORS_CONFIG[cat_choice])
                     
-                    with st.spinner("Chargement des données géographiques et statistiques..."):
+                    # On utilise st.status pour un feedback détaillé (Streamlit 1.24+)
+                    with st.status("Récupération des données en cours...", expanded=True) as status:
+                        status.write("⌛ Chargement des contours géographiques...")
                         gdf_communes = get_communes_of_territory(row['CODE'], type_col)
                         
                         if gdf_communes is not None:
+                            n_communes = len(gdf_communes)
+                            status.write(f"✅ {n_communes} communes trouvées.")
+                            
                             map_col = None
                             legend_name = indicator_choice
                             fill_color = "YlOrRd"
@@ -517,24 +522,26 @@ if data:
                             elif indicator_choice == "Population municipale":
                                 map_col = "population"
                             else:
+                                status.write(f"⌛ Interrogation de l'API Insee pour '{indicator_choice}'...")
                                 pynsee_df = get_pynsee_indicators(gdf_communes['code'].tolist(), indicator_choice)
+                                
                                 if pynsee_df is not None and not pynsee_df.empty:
+                                    status.write("✅ Données statistiques reçues.")
                                     # Correction : OBS_VALUE_SEX si c'est un indicateur par sexe
                                     v_col = 'OBS_VALUE_SEX' if 'OBS_VALUE_SEX' in pynsee_df.columns else 'OBS_VALUE'
                                     pynsee_df = pynsee_df.rename(columns={v_col: 'val_pynsee', 'CODEGEO': 'code'})
-                                    # Gestion des doublons potentiels
                                     pynsee_df = pynsee_df.drop_duplicates(subset=['code'])
                                     gdf_communes = gdf_communes.merge(pynsee_df[['code', 'val_pynsee']], on='code', how='left')
                                     map_col = "val_pynsee"
                                     
-                                    # Couleurs personnalisées selon l'indicateur
                                     if "Niveau de vie" in indicator_choice: fill_color = "YlGn"
                                     elif "pauvres" in indicator_choice: fill_color = "RdPu"
                                 else:
-                                    st.warning(f"Indicateur '{indicator_choice}' non disponible pour cette zone ou en cours de mapping.")
+                                    st.warning(f"Indicateur '{indicator_choice}' non disponible ou API Insee saturée.")
                             
                             if map_col:
-                                # Suppression des lignes avec NaN pour la carte
+                                status.write("⌛ Génération de la carte interactive...")
+                                # Suppression des lignes avec NaN
                                 gdf_plot = gdf_communes.dropna(subset=[map_col])
                                 
                                 if not gdf_plot.empty:
@@ -565,13 +572,14 @@ if data:
                                         )
                                     )
                                     m_choroplet.add_child(tooltip)
+                                    status.update(label="✅ Analyse cartographique terminée !", state="complete")
                                     st_folium(m_choroplet, width=1000, height=600, key="map_choropleth")
                                 else:
-                                    st.warning("Aucune donnée à afficher pour cet indicateur.")
+                                    status.update(label="⚠️ Aucune donnée statistique exploitable.", state="error")
                             else:
-                                st.info("Chargement des données en cours...")
+                                status.update(label="⚠️ Échec de la récupération des données.", state="error")
                         else:
-                            st.error("Impossible de charger les données communales.")
+                            status.update(label="❌ Impossible de charger les communes.", state="error")
 
         else:
             st.sidebar.warning("Aucun résultat.")
