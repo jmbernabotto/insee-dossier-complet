@@ -77,7 +77,8 @@ def get_geo(code, kind, name):
     
     elif kind == "departements":
         # Source alternative fiable pour les départements
-        url = f"https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/departements/{clean_code}-{name.lower().replace(' ', '-').replace('\'', '-')}/departement-{clean_code}-{name.lower().replace(' ', '-').replace('\'', '-')}.geojson"
+        clean_name = unidecode(name).lower().replace(' ', '-').replace('\'', '-')
+        url = f"https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/departements/{clean_code}-{clean_name}/departement-{clean_code}-{clean_name}.geojson"
         # Version simplifiée de l'URL si la complexe échoue
         urls = [
             url,
