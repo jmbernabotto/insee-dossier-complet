@@ -549,6 +549,7 @@ if data:
                     indicator_choice = st.selectbox("Indicateur à afficher", INDICATORS_CONFIG[cat_choice])
                     
                     # On utilise st.status pour un feedback détaillé (Streamlit 1.24+)
+                    m_choroplet = None
                     with st.status("Récupération des données en cours...", expanded=True) as status:
                         status.write("⌛ Chargement des contours géographiques...")
                         gdf_communes = get_communes_of_territory(row['CODE'], type_col)
@@ -626,13 +627,15 @@ if data:
                                     )
                                     m_choroplet.add_child(tooltip)
                                     status.update(label="✅ Analyse cartographique prête !", state="complete")
-                                    st_folium(m_choroplet, width=1000, height=600, key="map_choropleth")
                                 else:
                                     status.update(label="⚠️ Aucune donnée statistique exploitable.", state="error")
                             else:
                                 status.update(label="⚠️ Échec de la récupération des données.", state="error")
                         else:
                             status.update(label="❌ Impossible de charger les communes.", state="error")
+                    
+                    if m_choroplet:
+                        st_folium(m_choroplet, width=1000, height=600, key="map_choropleth")
 
         else:
             st.sidebar.warning("Aucun résultat.")
