@@ -332,19 +332,23 @@ def get_territory_indicators(code, kind):
     # Récupération de données complémentaires via Pynsee (Recensement)
     try:
         nivgeo = "COM" if kind == "communes" else ("EPCI" if kind in ["EPCI", "intercommunalites"] else ("DEP" if kind == "departements" else "REG"))
-        # Indicateurs Logement (RP)
-        df_rp = pynsee.get_local_data(dataset_version='GEO2021RP2018', nivgeo=nivgeo, geocodes=[code], variables='STOCD-CATL')
-        if df_rp is not None and not df_rp.empty:
-            # Taux de propriétaires (STOCD 10)
-            prop = df_rp[df_rp['STOCD'] == '10']
-            total_log = df_rp[df_rp['STOCD'] == 'ENS']
-            if not prop.empty and not total_log.empty:
-                indicators['Part des propriétaires (%)'] = round((prop.iloc[0]['OBS_VALUE'] / total_log.iloc[0]['OBS_VALUE']) * 100, 1)
-            
-            # Taux de résidences secondaires (CATL 2)
-            sec = df_rp[df_rp['CATL'] == '2']
-            if not sec.empty and not total_log.empty:
+        
+        # 1. Catégories de logements (CATL) pour les résidences secondaires
+        df_catl = pynsee.get_local_data(dataset_version='GEO2021RP2018', nivgeo=nivgeo, geocodes=[code], variables='CATL')
+        if df_catl is not None and not df_catl.empty:
+            total_log = df_catl[df_catl['CATL'] == 'ENS']
+            sec = df_catl[df_catl['CATL'] == '2'] # Résidences secondaires
+            if not sec.empty and not total_log.empty and total_log.iloc[0]['OBS_VALUE'] > 0:
                 indicators['Part des résidences secondaires (%)'] = round((sec.iloc[0]['OBS_VALUE'] / total_log.iloc[0]['OBS_VALUE']) * 100, 1)
+
+        # 2. Statut d'occupation (STOCD) pour les propriétaires (concerne les résidences principales)
+        df_stocd = pynsee.get_local_data(dataset_version='GEO2021RP2018', nivgeo=nivgeo, geocodes=[code], variables='STOCD')
+        if df_stocd is not None and not df_stocd.empty:
+            prop = df_stocd[df_stocd['STOCD'] == '10'] # Propriétaires
+            total_rp = df_stocd[df_stocd['STOCD'] == 'ENS'] # Total résidences principales
+            if not prop.empty and not total_rp.empty and total_rp.iloc[0]['OBS_VALUE'] > 0:
+                indicators['Part des propriétaires (%)'] = round((prop.iloc[0]['OBS_VALUE'] / total_rp.iloc[0]['OBS_VALUE']) * 100, 1)
+                
     except Exception as e:
         print(f"Erreur RP Pynsee pour {code}: {e}")
     
