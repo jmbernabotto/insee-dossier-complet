@@ -487,8 +487,9 @@ if data:
                         st.metric("Niveau de vie (médian)", f"{int(indicators['Niveau de vie Médian (€)']):,} €".replace(',', ' '))
                     if 'Taux de pauvreté (%)' in indicators:
                         st.metric("Taux de pauvreté", f"{indicators['Taux de pauvreté (%)']}%")
-                    if 'Part des revenus d\'activité (%)' in indicators:
-                        st.caption(f"Revenus d'activité : {indicators['Part des revenus d\\'activité (%)']}%")
+                    if "Part des revenus d'activité (%)" in indicators:
+                        val_activite = indicators["Part des revenus d'activité (%)"]
+                        st.caption(f"Revenus d'activité : {val_activite}%")
 
                 with m3:
                     st.subheader("🏠 Logement")
