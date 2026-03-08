@@ -499,7 +499,7 @@ if data:
                         ]
 
                     # Zone de chat simplifiée
-                    chat_container = st.container(height=300)
+                    chat_container = st.container()
                     with chat_container:
                         for message in st.session_state.messages:
                             with st.chat_message(message["role"]):
