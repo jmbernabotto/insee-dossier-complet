@@ -295,17 +295,33 @@ def get_territory_indicators(code, kind):
     prefix = "EPCI" if kind in ["EPCI", "intercommunalites"] else ("COM" if kind == "communes" else ("DEP" if kind == "departements" else "REG"))
     indicators['URL Dossier INSEE'] = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{code}"
 
-    # Données géographiques de base
-    if kind == "communes":
+    # Données géographiques de base via geo.api.gouv.fr
+    geo_mapping = {
+        "communes": "communes",
+        "EPCI": "epcis",
+        "intercommunalites": "epcis",
+        "departements": "departements",
+        "regions": "regions"
+    }
+    
+    api_kind = geo_mapping.get(kind)
+    if api_kind:
         try:
-            r = requests.get(f"https://geo.api.gouv.fr/communes/{code}?fields=population,surface,codesPostaux,codeDepartement,codeRegion")
+            fields = "population,surface"
+            if kind == "communes":
+                fields += ",codesPostaux,codeDepartement,codeRegion"
+            
+            r = requests.get(f"https://geo.api.gouv.fr/{api_kind}/{code}?fields={fields}")
             if r.status_code == 200:
                 data = r.json()
-                indicators['Population'] = data.get('population')
-                indicators['Surface (ha)'] = data.get('surface')
-                indicators['Code Département'] = data.get('codeDepartement')
+                if 'population' in data:
+                    indicators['Population'] = data.get('population')
+                if 'surface' in data:
+                    indicators['Surface (ha)'] = data.get('surface')
+                if 'codeDepartement' in data:
+                    indicators['Code Département'] = data.get('codeDepartement')
         except:
-            if code == "62498": # Fallback Lens
+            if code == "62498" and kind == "communes": # Fallback Lens
                 indicators['Population'] = 32920
                 indicators['Surface (ha)'] = 1170
     
@@ -424,6 +440,10 @@ if data:
                     st.metric("Territoire", row['TITLE'])
                     st.write(f"Code : {row['CODE']}")
                     
+                    # Affichage de la population
+                    if 'Population' in indicators and indicators['Population']:
+                        st.metric("Population totale", f"{int(indicators['Population']):,} hab.".replace(',', ' '))
+                        
                     # Affichage des indicateurs FILOSOFI s'ils existent
                     if 'Niveau de vie Médian (€)' in indicators:
                         st.metric("Niveau de vie des individus (médian)", f"{int(indicators['Niveau de vie Médian (€)']):,} €".replace(',', ' '))
