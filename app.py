@@ -318,12 +318,35 @@ def get_territory_indicators(code, kind):
                     indicators['Population'] = data.get('population')
                 if 'surface' in data:
                     indicators['Surface (ha)'] = data.get('surface')
+                    if indicators.get('Population') and indicators['Surface (ha)'] > 0:
+                        # Densité : Pop / (Surface en ha / 100) = hab/km2
+                        indicators['Densité (hab/km²)'] = round(indicators['Population'] / (indicators['Surface (ha)'] / 100), 1)
                 if 'codeDepartement' in data:
                     indicators['Code Département'] = data.get('codeDepartement')
         except:
             if code == "62498" and kind == "communes": # Fallback Lens
                 indicators['Population'] = 32920
                 indicators['Surface (ha)'] = 1170
+                indicators['Densité (hab/km²)'] = 2813.7
+
+    # Récupération de données complémentaires via Pynsee (Recensement)
+    try:
+        nivgeo = "COM" if kind == "communes" else ("EPCI" if kind in ["EPCI", "intercommunalites"] else ("DEP" if kind == "departements" else "REG"))
+        # Indicateurs Logement (RP)
+        df_rp = pynsee.get_local_data(dataset_version='GEO2021RP2018', nivgeo=nivgeo, geocodes=[code], variables='STOCD-CATL')
+        if df_rp is not None and not df_rp.empty:
+            # Taux de propriétaires (STOCD 10)
+            prop = df_rp[df_rp['STOCD'] == '10']
+            total_log = df_rp[df_rp['STOCD'] == 'ENS']
+            if not prop.empty and not total_log.empty:
+                indicators['Part des propriétaires (%)'] = round((prop.iloc[0]['OBS_VALUE'] / total_log.iloc[0]['OBS_VALUE']) * 100, 1)
+            
+            # Taux de résidences secondaires (CATL 2)
+            sec = df_rp[df_rp['CATL'] == '2']
+            if not sec.empty and not total_log.empty:
+                indicators['Part des résidences secondaires (%)'] = round((sec.iloc[0]['OBS_VALUE'] / total_log.iloc[0]['OBS_VALUE']) * 100, 1)
+    except Exception as e:
+        print(f"Erreur RP Pynsee pour {code}: {e}")
     
     # Intégration des données FILOSOFI riches (Pauvreté, Revenus)
     # Fonctionne pour Communes, EPCI, Départements
@@ -433,64 +456,88 @@ if data:
             tab1, tab2 = st.tabs(["📌 Vue Générale", "🗺️ Analyse Cartographique (Communes)"])
 
             with tab1:
-                col1, col2 = st.columns([1, 2])
                 indicators = get_territory_indicators(row['CODE'], type_col)
                 
-                with col1:
-                    st.metric("Territoire", row['TITLE'])
-                    st.write(f"Code : {row['CODE']}")
-                    
-                    # Affichage de la population
-                    if 'Population' in indicators and indicators['Population']:
-                        st.metric("Population totale", f"{int(indicators['Population']):,} hab.".replace(',', ' '))
-                        
-                    # Affichage des indicateurs FILOSOFI s'ils existent
-                    if 'Niveau de vie Médian (€)' in indicators:
-                        st.metric("Niveau de vie des individus (médian)", f"{int(indicators['Niveau de vie Médian (€)']):,} €".replace(',', ' '))
-                    if 'Taux de pauvreté (%)' in indicators:
-                        st.metric("Part des ménages pauvres", f"{indicators['Taux de pauvreté (%)']}%")
-                    
+                # En-tête avec boutons d'accès rapide
+                col_title, col_btns = st.columns([2, 1])
+                with col_title:
+                    st.write(f"**Type :** {label_type} | **Code :** {row['CODE']}")
+                with col_btns:
                     prefix = "EPCI" if type_col in ["EPCI", "intercommunalites"] else ("COM" if type_col == "communes" else ("DEP" if type_col == "departements" else "REG"))
                     url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
-                    
-                    st.link_button("📄 Voir le dossier complet", url_insee, use_container_width=True)
-                    st.link_button("🗺️ Carte interactive (Carroyage 200m)", "https://www.insee.fr/fr/outil-interactif/7737357/map.html", use_container_width=True)
-                    st.caption("💡 Cliquez sur le bouton **Imprimer** en haut du dossier pour le format PDF.")
-                
-                gdf_main = get_geo(row['CODE'], type_col, row['TITLE'])
-                if gdf_main is not None:
-                    with col2:
-                        center = gdf_main.to_crs(epsg=3857).centroid.to_crs(epsg=4326).iloc[0]
-                        m = folium.Map(location=[center.y, center.x], zoom_start=7 if type_col in ["regions", "departements"] else 9)
-                        
-                        for col in gdf_main.columns:
-                            if col != 'geometry':
-                                gdf_main[col] = gdf_main[col].astype(str)
-                        
-                        geojson_data = json.loads(gdf_main.to_json())
-                        folium.GeoJson(geojson_data).add_to(m)
-                        st_folium(m, width=700, height=400, returned_objects=[], key="map_main")
+                    st.link_button("📄 Dossier INSEE", url_insee, use_container_width=True)
 
                 st.divider()
-                st.subheader(f"💬 Assistant IA - {row['TITLE']}")
+
+                # Trois colonnes d'indicateurs fondamentaux
+                m1, m2, m3 = st.columns(3)
                 
-                if "messages" not in st.session_state:
-                    st.session_state.messages = []
+                with m1:
+                    st.subheader("📊 Démographie")
+                    if 'Population' in indicators:
+                        st.metric("Population totale", f"{int(indicators['Population']):,} hab.".replace(',', ' '))
+                    if 'Densité (hab/km²)' in indicators:
+                        st.metric("Densité", f"{indicators['Densité (hab/km²)']} hab/km²")
+                    if 'Surface (ha)' in indicators:
+                        st.write(f"Surface : {int(indicators['Surface (ha)']):,} ha".replace(',', ' '))
 
-                for message in st.session_state.messages:
-                    with st.chat_message(message["role"]):
-                        st.markdown(message["content"])
+                with m2:
+                    st.subheader("💰 Social & Revenus")
+                    if 'Niveau de vie Médian (€)' in indicators:
+                        st.metric("Niveau de vie (médian)", f"{int(indicators['Niveau de vie Médian (€)']):,} €".replace(',', ' '))
+                    if 'Taux de pauvreté (%)' in indicators:
+                        st.metric("Taux de pauvreté", f"{indicators['Taux de pauvreté (%)']}%")
+                    if 'Part des revenus d\'activité (%)' in indicators:
+                        st.caption(f"Revenus d'activité : {indicators['Part des revenus d\\'activité (%)']}%")
 
-                if prompt := st.chat_input(f"Posez une question sur {row['TITLE']}"):
-                    st.session_state.messages.append({"role": "user", "content": prompt})
-                    with st.chat_message("user"):
-                        st.markdown(prompt)
+                with m3:
+                    st.subheader("🏠 Logement")
+                    if 'Part des propriétaires (%)' in indicators:
+                        st.metric("Propriétaires", f"{indicators['Part des propriétaires (%)']}%")
+                    if 'Part des résidences secondaires (%)' in indicators:
+                        st.metric("Rés. secondaires", f"{indicators['Part des résidences secondaires (%)']}%")
 
-                    with st.chat_message("assistant"):
-                        with st.spinner("Réflexion..."):
-                            response = ask_gemini(prompt, indicators, row['TITLE'])
-                            st.markdown(response)
-                    st.session_state.messages.append({"role": "assistant", "content": response})
+                st.divider()
+                
+                # Carte de situation et Assistant
+                c1, c2 = st.columns([1, 1])
+                
+                with c1:
+                    st.subheader("📍 Localisation")
+                    gdf_main = get_geo(row['CODE'], type_col, row['TITLE'])
+                    if gdf_main is not None:
+                        center = gdf_main.to_crs(epsg=3857).centroid.to_crs(epsg=4326).iloc[0]
+                        m = folium.Map(location=[center.y, center.x], zoom_start=7 if type_col in ["regions", "departements"] else 9)
+                        for col in gdf_main.columns:
+                            if col != 'geometry': gdf_main[col] = gdf_main[col].astype(str)
+                        geojson_data = json.loads(gdf_main.to_json())
+                        folium.GeoJson(geojson_data).add_to(m)
+                        st_folium(m, width=500, height=350, returned_objects=[], key="map_main")
+                
+                with c2:
+                    st.subheader(f"💬 Assistant IA")
+                    st.link_button("🗺️ Carte Carroyée (Insee)", "https://www.insee.fr/fr/outil-interactif/7737357/map.html", use_container_width=True)
+                    
+                    if "messages" not in st.session_state:
+                        st.session_state.messages = []
+
+                    # Zone de chat simplifiée pour la vue générale
+                    chat_container = st.container(height=300)
+                    with chat_container:
+                        for message in st.session_state.messages:
+                            with st.chat_message(message["role"]):
+                                st.markdown(message["content"])
+
+                    if prompt := st.chat_input(f"Question sur {row['TITLE']}"):
+                        st.session_state.messages.append({"role": "user", "content": prompt})
+                        with chat_container:
+                            with st.chat_message("user"):
+                                st.markdown(prompt)
+                            with st.chat_message("assistant"):
+                                with st.spinner("Réflexion..."):
+                                    response = ask_gemini(prompt, indicators, row['TITLE'])
+                                    st.markdown(response)
+                        st.session_state.messages.append({"role": "assistant", "content": response})
 
             with tab2:
                 if type_col in ["communes"]:
