@@ -329,29 +329,6 @@ def get_territory_indicators(code, kind):
                 indicators['Surface (ha)'] = 1170
                 indicators['Densité (hab/km²)'] = 2813.7
 
-    # Récupération de données complémentaires via Pynsee (Recensement)
-    try:
-        nivgeo = "COM" if kind == "communes" else ("EPCI" if kind in ["EPCI", "intercommunalites"] else ("DEP" if kind == "departements" else "REG"))
-        
-        # 1. Catégories de logements (CATL) pour les résidences secondaires
-        df_catl = pynsee.get_local_data(dataset_version='GEO2021RP2018', nivgeo=nivgeo, geocodes=[code], variables='CATL')
-        if df_catl is not None and not df_catl.empty:
-            total_log = df_catl[df_catl['CATL'] == 'ENS']
-            sec = df_catl[df_catl['CATL'] == '2'] # Résidences secondaires
-            if not sec.empty and not total_log.empty and total_log.iloc[0]['OBS_VALUE'] > 0:
-                indicators['Part des résidences secondaires (%)'] = round((sec.iloc[0]['OBS_VALUE'] / total_log.iloc[0]['OBS_VALUE']) * 100, 1)
-
-        # 2. Statut d'occupation (STOCD) pour les propriétaires (concerne les résidences principales)
-        df_stocd = pynsee.get_local_data(dataset_version='GEO2021RP2018', nivgeo=nivgeo, geocodes=[code], variables='STOCD')
-        if df_stocd is not None and not df_stocd.empty:
-            prop = df_stocd[df_stocd['STOCD'] == '10'] # Propriétaires
-            total_rp = df_stocd[df_stocd['STOCD'] == 'ENS'] # Total résidences principales
-            if not prop.empty and not total_rp.empty and total_rp.iloc[0]['OBS_VALUE'] > 0:
-                indicators['Part des propriétaires (%)'] = round((prop.iloc[0]['OBS_VALUE'] / total_rp.iloc[0]['OBS_VALUE']) * 100, 1)
-                
-    except Exception as e:
-        print(f"Erreur RP Pynsee pour {code}: {e}")
-    
     # Intégration des données FILOSOFI riches (Pauvreté, Revenus)
     # Fonctionne pour Communes, EPCI, Départements
     filo_stats = get_filosofi_data(code, kind)
@@ -473,8 +450,8 @@ if data:
 
                 st.divider()
 
-                # Trois colonnes d'indicateurs fondamentaux
-                m1, m2, m3 = st.columns(3)
+                # Deux colonnes d'indicateurs fondamentaux
+                m1, m2 = st.columns(2)
                 
                 with m1:
                     st.subheader("📊 Démographie")
@@ -494,13 +471,6 @@ if data:
                     if "Part des revenus d'activité (%)" in indicators:
                         val_activite = indicators["Part des revenus d'activité (%)"]
                         st.caption(f"Revenus d'activité : {val_activite}%")
-
-                with m3:
-                    st.subheader("🏠 Logement")
-                    if 'Part des propriétaires (%)' in indicators:
-                        st.metric("Propriétaires", f"{indicators['Part des propriétaires (%)']}%")
-                    if 'Part des résidences secondaires (%)' in indicators:
-                        st.metric("Rés. secondaires", f"{indicators['Part des résidences secondaires (%)']}%")
 
                 st.divider()
                 
