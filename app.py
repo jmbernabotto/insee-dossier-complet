@@ -494,10 +494,14 @@ if data:
                     st.link_button("🗺️ Carte Carroyée (Insee)", "https://www.insee.fr/fr/outil-interactif/7737357/map.html", use_container_width=True)
                     
                     if "messages" not in st.session_state:
-                        st.session_state.messages = []
+                        st.session_state.messages = [
+                            {"role": "assistant", "content": f"Bonjour ! Je suis votre expert Insee. Posez-moi vos questions sur **{row['TITLE']}**."}
+                        ]
 
-                    # Zone de chat simplifiée pour la vue générale
-                    chat_container = st.container(height=300)
+                    # Zone de chat : on n'affiche le cadre avec défilement que s'il y a plusieurs messages
+                    height = 300 if len(st.session_state.messages) > 1 else None
+                    chat_container = st.container(height=height)
+                    
                     with chat_container:
                         for message in st.session_state.messages:
                             with st.chat_message(message["role"]):
@@ -513,6 +517,7 @@ if data:
                                     response = ask_gemini(prompt, indicators, row['TITLE'])
                                     st.markdown(response)
                         st.session_state.messages.append({"role": "assistant", "content": response})
+                        st.rerun()
 
             with tab2:
                 if type_col in ["communes"]:
