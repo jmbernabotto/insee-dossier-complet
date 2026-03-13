@@ -272,7 +272,9 @@ def get_filosofi_data(code, kind):
             if 'UNIT' in df_glob.columns:
                 med = df_glob[df_glob['UNIT'] == 'MEDIANE']
                 if not med.empty:
-                    stats['Niveau de vie Médian (€)'] = med.iloc[0]['OBS_VALUE']
+                    val = med.iloc[0]['OBS_VALUE']
+                    if not pd.isna(val):
+                        stats['Niveau de vie Médian (€)'] = val
             else:
                 # Si UNIT manque, pynsee a peut-être renvoyé une seule variable ou structuré différemment
                 # On tente une approche plus robuste en bouclant sur les variables connues
@@ -283,8 +285,10 @@ def get_filosofi_data(code, kind):
                                                   geocodes=[code],
                                                   variables=var)
                         if df_var is not None and not df_var.empty:
-                            label = 'Niveau de vie Médian (€)' if var == 'MEDIANE' else 'Nombre d\'individus (fiscaux)'
-                            stats[label] = df_var.iloc[0]['OBS_VALUE']
+                            val = df_var.iloc[0]['OBS_VALUE']
+                            if not pd.isna(val):
+                                label = 'Niveau de vie Médian (€)' if var == 'MEDIANE' else 'Nombre d\'individus (fiscaux)'
+                                stats[label] = val
                     except: pass
 
         # 2. Données détaillées (Pauvreté, Inégalités)
@@ -295,7 +299,9 @@ def get_filosofi_data(code, kind):
                                           geocodes=[code],
                                           variables=var)
                 if df_det is not None and not df_det.empty:
-                    stats[label] = df_det.iloc[0]['OBS_VALUE']
+                    val = df_det.iloc[0]['OBS_VALUE']
+                    if not pd.isna(val):
+                        stats[label] = val
             except: pass
                 
     except Exception as e:
@@ -505,20 +511,20 @@ if data:
                 
                 with m1:
                     st.subheader("📊 Démographie")
-                    if 'Population' in indicators:
+                    if 'Population' in indicators and not pd.isna(indicators['Population']):
                         st.metric("Population totale", f"{int(indicators['Population']):,} hab.".replace(',', ' '))
-                    if 'Densité (hab/km²)' in indicators:
+                    if 'Densité (hab/km²)' in indicators and not pd.isna(indicators['Densité (hab/km²)']):
                         st.metric("Densité", f"{indicators['Densité (hab/km²)']} hab/km²")
-                    if 'Surface (ha)' in indicators:
+                    if 'Surface (ha)' in indicators and not pd.isna(indicators['Surface (ha)']):
                         st.write(f"Surface : {int(indicators['Surface (ha)']):,} ha".replace(',', ' '))
 
                 with m2:
                     st.subheader("💰 Social & Revenus")
-                    if 'Niveau de vie Médian (€)' in indicators:
+                    if 'Niveau de vie Médian (€)' in indicators and not pd.isna(indicators['Niveau de vie Médian (€)']):
                         st.metric("Niveau de vie (médian)", f"{int(indicators['Niveau de vie Médian (€)']):,} €".replace(',', ' '))
-                    if 'Taux de pauvreté (%)' in indicators:
+                    if 'Taux de pauvreté (%)' in indicators and not pd.isna(indicators['Taux de pauvreté (%)']):
                         st.metric("Taux de pauvreté", f"{indicators['Taux de pauvreté (%)']}%")
-                    if "Part des revenus d'activité (%)" in indicators:
+                    if "Part des revenus d'activité (%)" in indicators and not pd.isna(indicators["Part des revenus d'activité (%)"]):
                         val_activite = indicators["Part des revenus d'activité (%)"]
                         st.caption(f"Revenus d'activité : {val_activite}%")
 
