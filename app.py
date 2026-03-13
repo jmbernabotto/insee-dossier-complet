@@ -261,48 +261,49 @@ def get_filosofi_data(code, kind):
         
     stats = {}
     try:
-        # Configuration des variables à extraire
-        configs = [
-            ('INDICS_FILO_DISP', 'MEDIANE', 'Niveau de vie Médian (€)'),
-            ('INDICS_FILO_DISP_DET', 'TP60', 'Taux de pauvreté (%)'),
-            ('INDICS_FILO_DISP_DET', 'PACT', 'Part des revenus d\'activité (%)'),
-            ('INDICS_FILO_DISP_DET', 'RD', 'Rapport Interdécile (D9/D1)')
-        ]
-        
-        for ds_var, unit_val, label in configs:
-            for ds_version in ['GEO2021FILO2018', 'GEO2020FILO2018']:
-                try:
-                    df = pynsee.get_local_data(dataset_version=ds_version, 
-                                              nivgeo=nivgeo, 
-                                              geocodes=[code],
-                                              variables=ds_var)
-                    
-                    if df is not None and not df.empty:
-                        # Recherche intelligente de la ligne correspondante
-                        target_row = None
-                        
-                        # 1. Filtre par UNIT si la colonne existe
-                        if 'UNIT' in df.columns:
-                            target_row = df[df['UNIT'] == unit_val]
-                        
-                        # 2. Recherche par valeur si UNIT manque (Insee change parfois les noms de colonnes)
-                        if (target_row is None or target_row.empty):
-                            for col in df.columns:
-                                if unit_val in df[col].values:
-                                    target_row = df[df[col] == unit_val]
-                                    break
-                        
-                        # 3. Fallback si une seule ligne renvoyée (souvent le cas pour MEDIANE, TP60 demandés seuls)
-                        if (target_row is None or target_row.empty) and len(df) == 1:
-                            target_row = df
-                        
-                        if target_row is not None and not target_row.empty:
-                            val = target_row.iloc[0]['OBS_VALUE']
+        # 1. Tentative de récupération groupée (Méthode standard)
+        for ds_var in ['INDICS_FILO_DISP', 'INDICS_FILO_DISP_DET']:
+            try:
+                df = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
+                                          nivgeo=nivgeo, 
+                                          geocodes=[code],
+                                          variables=ds_var)
+                
+                if df is not None and not df.empty and 'UNIT' in df.columns:
+                    # Mapping des unités vers les labels
+                    unit_map = {
+                        'MEDIANE': 'Niveau de vie Médian (€)',
+                        'TP60': 'Taux de pauvreté (%)',
+                        'PACT': 'Part des revenus d\'activité (%)',
+                        'RD': 'Rapport Interdécile (D9/D1)'
+                    }
+                    for unit, label in unit_map.items():
+                        row = df[df['UNIT'] == unit]
+                        if not row.empty:
+                            val = row.iloc[0]['OBS_VALUE']
                             if not pd.isna(val):
                                 stats[label] = val
-                                break # On a trouvé pour ce DS_VAR, on passe au config suivant
-                except:
-                    continue
+            except: continue
+
+        # 2. Si rien n'est trouvé, tentative par variable directe
+        if not stats:
+            direct_configs = [
+                ('MEDIANE', 'Niveau de vie Médian (€)'),
+                ('TP60', 'Taux de pauvreté (%)'),
+                ('PACT', 'Part des revenus d\'activité (%)'),
+                ('RD', 'Rapport Interdécile (D9/D1)')
+            ]
+            for var_code, label in direct_configs:
+                try:
+                    df = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
+                                              nivgeo=nivgeo, 
+                                              geocodes=[code],
+                                              variables=var_code)
+                    if df is not None and not df.empty:
+                        val = df.iloc[0]['OBS_VALUE']
+                        if not pd.isna(val):
+                            stats[label] = val
+                except: continue
                 
     except Exception as e:
         print(f"Erreur FILOSOFI globale pour {code}: {e}")
