@@ -261,38 +261,42 @@ def get_filosofi_data(code, kind):
         
     stats = {}
     try:
-        # 1. Données détaillées (Pauvreté, Inégalités)
-        df_det = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
-                                  nivgeo=nivgeo, 
-                                  geocodes=[code],
-                                  variables='INDICS_FILO_DISP_DET')
-        
-        if df_det is not None and not df_det.empty:
-            # Extraction Taux de pauvreté
-            tp60 = df_det[df_det['UNIT'] == 'TP60']
-            if not tp60.empty:
-                stats['Taux de pauvreté (%)'] = tp60.iloc[0]['OBS_VALUE']
-            
-            # Extraction Rapport Interdécile
-            rd = df_det[df_det['UNIT'] == 'RD']
-            if not rd.empty:
-                stats['Rapport Interdécile (D9/D1)'] = rd.iloc[0]['OBS_VALUE']
-                
-            # Extraction Part des revenus d'activité
-            pact = df_det[df_det['UNIT'] == 'PACT']
-            if not pact.empty:
-                stats["Part des revenus d'activité (%)"] = pact.iloc[0]['OBS_VALUE']
-        
-        # 2. Données globales (Médiane)
+        # 1. Données globales (Médiane, etc.)
+        # On essaie de récupérer les variables directement si UNIT manque
         df_glob = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
                                   nivgeo=nivgeo, 
                                   geocodes=[code],
                                   variables='INDICS_FILO_DISP')
         
         if df_glob is not None and not df_glob.empty:
-            med = df_glob[df_glob['UNIT'] == 'MEDIANE']
-            if not med.empty:
-                stats['Niveau de vie Médian (€)'] = med.iloc[0]['OBS_VALUE']
+            if 'UNIT' in df_glob.columns:
+                med = df_glob[df_glob['UNIT'] == 'MEDIANE']
+                if not med.empty:
+                    stats['Niveau de vie Médian (€)'] = med.iloc[0]['OBS_VALUE']
+            else:
+                # Si UNIT manque, pynsee a peut-être renvoyé une seule variable ou structuré différemment
+                # On tente une approche plus robuste en bouclant sur les variables connues
+                for var in ['MEDIANE', 'NBPERS']:
+                    try:
+                        df_var = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
+                                                  nivgeo=nivgeo, 
+                                                  geocodes=[code],
+                                                  variables=var)
+                        if df_var is not None and not df_var.empty:
+                            label = 'Niveau de vie Médian (€)' if var == 'MEDIANE' else 'Nombre d\'individus (fiscaux)'
+                            stats[label] = df_var.iloc[0]['OBS_VALUE']
+                    except: pass
+
+        # 2. Données détaillées (Pauvreté, Inégalités)
+        for var, label in [('TP60', 'Taux de pauvreté (%)'), ('RD', 'Rapport Interdécile (D9/D1)'), ('PACT', 'Part des revenus d\'activité (%)')]:
+            try:
+                df_det = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
+                                          nivgeo=nivgeo, 
+                                          geocodes=[code],
+                                          variables=var)
+                if df_det is not None and not df_det.empty:
+                    stats[label] = df_det.iloc[0]['OBS_VALUE']
+            except: pass
                 
     except Exception as e:
         print(f"Erreur FILOSOFI pour {code}: {e}")
