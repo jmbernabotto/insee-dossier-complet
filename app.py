@@ -246,66 +246,57 @@ def get_pynsee_indicators(commune_codes, indicator_type):
 @st.cache_data
 def get_filosofi_data(code, kind):
     """Récupère les données socio-économiques complètes pour le territoire."""
-    # Mapping des niveaux
-    level_map = {
-        "communes": "COM",
-        "EPCI": "EPCI",
-        "intercommunalites": "EPCI",
-        "departements": "DEP",
-        "regions": "REG"
-    }
-    
+    level_map = {"communes": "COM", "EPCI": "EPCI", "intercommunalites": "EPCI", "departements": "DEP", "regions": "REG"}
     nivgeo = level_map.get(kind)
-    if not nivgeo:
-        return {}
+    if not nivgeo: return {}
         
     stats = {}
     try:
-        # 1. Données globales (Médiane, etc.)
-        # On essaie de récupérer les variables directement si UNIT manque
-        df_glob = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
-                                  nivgeo=nivgeo, 
-                                  geocodes=[code],
-                                  variables='INDICS_FILO_DISP')
+        # Configuration des variables à extraire
+        configs = [
+            ('INDICS_FILO_DISP', 'MEDIANE', 'Niveau de vie Médian (€)'),
+            ('INDICS_FILO_DISP_DET', 'TP60', 'Taux de pauvreté (%)'),
+            ('INDICS_FILO_DISP_DET', 'PACT', 'Part des revenus d\'activité (%)'),
+            ('INDICS_FILO_DISP_DET', 'RD', 'Rapport Interdécile (D9/D1)')
+        ]
         
-        if df_glob is not None and not df_glob.empty:
-            if 'UNIT' in df_glob.columns:
-                med = df_glob[df_glob['UNIT'] == 'MEDIANE']
-                if not med.empty:
-                    val = med.iloc[0]['OBS_VALUE']
-                    if not pd.isna(val):
-                        stats['Niveau de vie Médian (€)'] = val
-            else:
-                # Si UNIT manque, pynsee a peut-être renvoyé une seule variable ou structuré différemment
-                # On tente une approche plus robuste en bouclant sur les variables connues
-                for var in ['MEDIANE', 'NBPERS']:
-                    try:
-                        df_var = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
-                                                  nivgeo=nivgeo, 
-                                                  geocodes=[code],
-                                                  variables=var)
-                        if df_var is not None and not df_var.empty:
-                            val = df_var.iloc[0]['OBS_VALUE']
+        for ds_var, unit_val, label in configs:
+            for ds_version in ['GEO2021FILO2018', 'GEO2020FILO2018']:
+                try:
+                    df = pynsee.get_local_data(dataset_version=ds_version, 
+                                              nivgeo=nivgeo, 
+                                              geocodes=[code],
+                                              variables=ds_var)
+                    
+                    if df is not None and not df.empty:
+                        # Recherche intelligente de la ligne correspondante
+                        target_row = None
+                        
+                        # 1. Filtre par UNIT si la colonne existe
+                        if 'UNIT' in df.columns:
+                            target_row = df[df['UNIT'] == unit_val]
+                        
+                        # 2. Recherche par valeur si UNIT manque (Insee change parfois les noms de colonnes)
+                        if (target_row is None or target_row.empty):
+                            for col in df.columns:
+                                if unit_val in df[col].values:
+                                    target_row = df[df[col] == unit_val]
+                                    break
+                        
+                        # 3. Fallback si une seule ligne renvoyée (souvent le cas pour MEDIANE, TP60 demandés seuls)
+                        if (target_row is None or target_row.empty) and len(df) == 1:
+                            target_row = df
+                        
+                        if target_row is not None and not target_row.empty:
+                            val = target_row.iloc[0]['OBS_VALUE']
                             if not pd.isna(val):
-                                label = 'Niveau de vie Médian (€)' if var == 'MEDIANE' else 'Nombre d\'individus (fiscaux)'
                                 stats[label] = val
-                    except: pass
-
-        # 2. Données détaillées (Pauvreté, Inégalités)
-        for var, label in [('TP60', 'Taux de pauvreté (%)'), ('RD', 'Rapport Interdécile (D9/D1)'), ('PACT', 'Part des revenus d\'activité (%)')]:
-            try:
-                df_det = pynsee.get_local_data(dataset_version='GEO2021FILO2018', 
-                                          nivgeo=nivgeo, 
-                                          geocodes=[code],
-                                          variables=var)
-                if df_det is not None and not df_det.empty:
-                    val = df_det.iloc[0]['OBS_VALUE']
-                    if not pd.isna(val):
-                        stats[label] = val
-            except: pass
+                                break # On a trouvé pour ce DS_VAR, on passe au config suivant
+                except:
+                    continue
                 
     except Exception as e:
-        print(f"Erreur FILOSOFI pour {code}: {e}")
+        print(f"Erreur FILOSOFI globale pour {code}: {e}")
         
     return stats
 
