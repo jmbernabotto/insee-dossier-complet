@@ -148,15 +148,18 @@ def get_pynsee_indicators(commune_codes, indicator_type):
         elif indicator_type == "Nombre d'individus au sens fiscal":
             df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP')
             return df[df['UNIT'] == 'NBPERS'] if df is not None else None
-        elif indicator_type == "Part des familles pauvres (%)":
+        elif indicator_type == "Part des ménages pauvres (%)":
             df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP_DET')
             return df[df['UNIT'] == 'TP60'] if df is not None else None
+        elif indicator_type == "Part des logements sociaux (%)":
+            df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP_DET-OCCTYPR')
+            return df if df is not None else None
 
         # --- RECENSEMENT (RP) ---
         # Population Municipale (Source POPLEG via get_population pour 2022)
         if indicator_type.startswith("Population municipale"):
             try:
-                pop_data = pynsee.get_population()
+                pop_data = load_pop_data_cached()
                 df = pop_data[pop_data['code_insee'].isin(commune_codes)].copy()
                 df = df.rename(columns={'code_insee': 'CODEGEO', 'population': 'OBS_VALUE'})
                 
@@ -296,6 +299,11 @@ def get_filosofi_data(code, kind):
         
     return stats
 
+@st.cache_data
+def load_pop_data_cached():
+    """Cache le téléchargement des données de population pynsee."""
+    return pynsee.get_population()
+
 def get_territory_indicators(code, kind):
     """Récupère des indicateurs clés pour le territoire sélectionné."""
     indicators = {}
@@ -317,7 +325,7 @@ def get_territory_indicators(code, kind):
     if api_kind:
         # 1. Tentative avec pynsee (Source INSEE Officielle) - Version 2022 via get_population()
         try:
-            pop_data = pynsee.get_population()
+            pop_data = load_pop_data_cached()
             if kind == "communes":
                 match = pop_data[pop_data['code_insee'] == code]
                 if not match.empty:
@@ -371,8 +379,6 @@ def get_territory_indicators(code, kind):
     for k, v in filo_stats.items():
         if k not in indicators: # Priorité aux indicateurs déjà présents (comme Population)
             indicators[k] = v
-    
-    return indicators
     
     return indicators
 
