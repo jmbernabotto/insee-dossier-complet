@@ -148,27 +148,36 @@ def get_pynsee_indicators(commune_codes, indicator_type):
         elif indicator_type == "Nombre d'individus au sens fiscal":
             df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP')
             return df[df['UNIT'] == 'NBPERS'] if df is not None else None
-        elif indicator_type == "Part des ménages pauvres (%)":
+        elif indicator_type == "Part des familles pauvres (%)":
             df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP_DET')
             return df[df['UNIT'] == 'TP60'] if df is not None else None
-        elif indicator_type == "Part des logements sociaux (%)":
-            df = pynsee.get_local_data(dataset_version=ds_filo, nivgeo='COM', geocodes=commune_codes, variables='INDICS_FILO_DISP_DET-OCCTYPR')
-            # Variable indicative
-            return df if df is not None else None
 
         # --- RECENSEMENT (RP) ---
-        # Population Municipale (Source POPLEG)
+        # Population Municipale (Source POPLEG via get_population pour 2022)
         if indicator_type.startswith("Population municipale"):
-            df = pynsee.get_local_data(dataset_version='POPLEG2018', nivgeo='COM', geocodes=commune_codes, variables='IND_POPLEGALES')
-            if df is not None and not df.empty:
-                if "(homme)" in indicator_type or "(femme)" in indicator_type:
-                    # Proxy via RP 2011 (Sexe disponible)
-                    df_sex = pynsee.get_local_data(dataset_version='GEO2019RP2011', nivgeo='COM', geocodes=commune_codes, variables='SEXE-AGE15_15_90')
-                    if df_sex is not None:
-                        sex_code = '1' if '(homme)' in indicator_type else '2'
-                        df_res = df_sex.groupby(['CODEGEO', 'SEXE'])['OBS_VALUE'].sum().reset_index()
-                        return df_res[df_res['SEXE'] == sex_code].rename(columns={'OBS_VALUE': 'OBS_VALUE_SEX'})
-                return df[df['UNIT'] == 'POPMUN']
+            try:
+                pop_data = pynsee.get_population()
+                df = pop_data[pop_data['code_insee'].isin(commune_codes)].copy()
+                df = df.rename(columns={'code_insee': 'CODEGEO', 'population': 'OBS_VALUE'})
+                
+                if df is not None and not df.empty:
+                    if "(homme)" in indicator_type or "(femme)" in indicator_type:
+                        # Proxy via RP le plus récent disponible pour le sexe
+                        df_sex = pynsee.get_local_data(dataset_version=ds_rp, nivgeo='COM', geocodes=commune_codes, variables='SEXE-AGE15_15_90')
+                        if df_sex is not None:
+                            sex_code = '1' if '(homme)' in indicator_type else '2'
+                            df_res = df_sex.groupby(['CODEGEO', 'SEXE'])['OBS_VALUE'].sum().reset_index()
+                            return df_res[df_res['SEXE'] == sex_code].rename(columns={'OBS_VALUE': 'OBS_VALUE_SEX'})
+                    
+                    # Pour la cartographie, on a besoin de OBS_VALUE
+                    return df[['CODEGEO', 'OBS_VALUE']]
+            except Exception as e:
+                print(f"Erreur mapping population 2022 : {e}")
+                # Fallback vers ancienne méthode
+                df = pynsee.get_local_data(dataset_version='POPLEG2018', nivgeo='COM', geocodes=commune_codes, variables='IND_POPLEGALES')
+                if df is not None and not df.empty:
+                    if 'UNIT' not in df.columns: df['UNIT'] = 'POPMUN'
+                    return df[df['UNIT'] == 'POPMUN']
 
         # Indicateurs Thématiques (RP 2018)
         mapping_rp = {
@@ -306,6 +315,30 @@ def get_territory_indicators(code, kind):
     
     api_kind = geo_mapping.get(kind)
     if api_kind:
+        # 1. Tentative avec pynsee (Source INSEE Officielle) - Version 2022 via get_population()
+        try:
+            pop_data = pynsee.get_population()
+            if kind == "communes":
+                match = pop_data[pop_data['code_insee'] == code]
+                if not match.empty:
+                    indicators['Population'] = int(match['population'].iloc[0])
+            elif kind in ["EPCI", "intercommunalites"]:
+                # siren_code_epci est le champ dans pop_data pour l'EPCI
+                match_pop = pop_data[pop_data['codes_siren_des_epci'] == code]['population'].sum()
+                if match_pop > 0:
+                    indicators['Population'] = int(match_pop)
+            elif kind == "departements":
+                match_pop = pop_data[pop_data['code_insee_du_departement'] == code]['population'].sum()
+                if match_pop > 0:
+                    indicators['Population'] = int(match_pop)
+            elif kind == "regions":
+                match_pop = pop_data[pop_data['code_insee_de_la_region'] == code]['population'].sum()
+                if match_pop > 0:
+                    indicators['Population'] = int(match_pop)
+        except Exception as e:
+            print(f"Erreur pynsee.get_population : {e}")
+
+        # 2. Fallback ou complément via geo.api.gouv.fr
         try:
             fields = "population,surface"
             if kind == "communes":
@@ -314,8 +347,10 @@ def get_territory_indicators(code, kind):
             r = requests.get(f"https://geo.api.gouv.fr/{api_kind}/{code}?fields={fields}")
             if r.status_code == 200:
                 data = r.json()
-                if 'population' in data:
+                # On ne remplace la population que si on ne l'a pas déjà eue via pynsee
+                if 'population' in data and 'Population' not in indicators:
                     indicators['Population'] = data.get('population')
+                
                 if 'surface' in data:
                     indicators['Surface (ha)'] = data.get('surface')
                     if indicators.get('Population') and indicators['Surface (ha)'] > 0:
@@ -332,7 +367,12 @@ def get_territory_indicators(code, kind):
     # Intégration des données FILOSOFI riches (Pauvreté, Revenus)
     # Fonctionne pour Communes, EPCI, Départements
     filo_stats = get_filosofi_data(code, kind)
-    indicators.update(filo_stats)
+    # On évite d'écraser la population officielle par des chiffres FILOSOFI (fiscaux)
+    for k, v in filo_stats.items():
+        if k not in indicators: # Priorité aux indicateurs déjà présents (comme Population)
+            indicators[k] = v
+    
+    return indicators
     
     return indicators
 
