@@ -608,7 +608,13 @@ if data:
                         gdf_main = get_geo(row['CODE'], type_col, row['TITLE'])
                         if gdf_main is not None:
                             center = gdf_main.to_crs(epsg=3857).centroid.to_crs(epsg=4326).iloc[0]
-                            m = folium.Map(location=[center.y, center.x], zoom_start=7 if type_col in ["regions", "departements"] else 11, tiles="cartodbpositron")
+                            # Utilisation des tuiles OSM France pour avoir les noms en français
+                            m = folium.Map(
+                                location=[center.y, center.x], 
+                                zoom_start=7 if type_col in ["regions", "departements"] else 11, 
+                                tiles='https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png',
+                                attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.openstreetmap.fr/">OpenStreetMap France</a>'
+                            )
                             for col in gdf_main.columns:
                                 if col != 'geometry': gdf_main[col] = gdf_main[col].astype(str)
                             geojson_data = json.loads(gdf_main.to_json())
