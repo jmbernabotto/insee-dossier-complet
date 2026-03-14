@@ -604,16 +604,17 @@ if data:
                 
                 with c1:
                     with st.container(border=True):
-                        st.markdown("#### 📍 Cartographie du territoire")
+                        # Sélecteur de vue compact sur la même ligne que le titre
+                        if 'map_is_satellite' not in st.session_state:
+                            st.session_state.map_is_satellite = False
                         
-                        # Sélecteur de vue pour la persistance
-                        if 'map_style' not in st.session_state:
-                            st.session_state.map_style = "Plan"
+                        col_map_title, col_map_toggle = st.columns([3, 1])
+                        with col_map_title:
+                            st.markdown("#### 📍 Cartographie")
+                        with col_map_toggle:
+                            st.session_state.map_is_satellite = st.toggle("🛰️ Satellite", value=st.session_state.map_is_satellite)
                         
-                        col_map_top, col_map_style = st.columns([2, 1])
-                        with col_map_style:
-                            map_choice = st.radio("Vue", ["Plan", "Satellite"], horizontal=True, label_visibility="collapsed")
-                            st.session_state.map_style = map_choice
+                        st.session_state.map_style = "Satellite" if st.session_state.map_is_satellite else "Plan"
 
                         gdf_main = get_geo(row['CODE'], type_col, row['TITLE'])
                         if gdf_main is not None:
