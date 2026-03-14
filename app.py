@@ -605,20 +605,58 @@ if data:
                 with c1:
                     with st.container(border=True):
                         st.markdown("#### 📍 Cartographie du territoire")
+                        
+                        # Sélecteur de vue pour la persistance
+                        if 'map_style' not in st.session_state:
+                            st.session_state.map_style = "Plan"
+                        
+                        col_map_top, col_map_style = st.columns([2, 1])
+                        with col_map_style:
+                            map_choice = st.radio("Vue", ["Plan", "Satellite"], horizontal=True, label_visibility="collapsed")
+                            st.session_state.map_style = map_choice
+
                         gdf_main = get_geo(row['CODE'], type_col, row['TITLE'])
                         if gdf_main is not None:
                             center = gdf_main.to_crs(epsg=3857).centroid.to_crs(epsg=4326).iloc[0]
-                            # Utilisation des tuiles OSM France pour avoir les noms en français
+                            
+                            # Initialisation de la carte avec les deux couches
                             m = folium.Map(
                                 location=[center.y, center.x], 
-                                zoom_start=7 if type_col in ["regions", "departements"] else 11, 
-                                tiles='https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png',
-                                attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.openstreetmap.fr/">OpenStreetMap France</a>'
+                                zoom_start=7 if type_col in ["regions", "departements"] else 11,
+                                tiles=None # On gère les tuiles manuellement
                             )
+
+                            # Couche Plan (OSM France)
+                            folium.TileLayer(
+                                tiles='https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png',
+                                attr='&copy; OpenStreetMap France',
+                                name='Plan',
+                                control=False,
+                                show=(st.session_state.map_style == "Plan")
+                            ).add_to(m)
+
+                            # Couche Satellite (Esri World Imagery)
+                            folium.TileLayer(
+                                tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                                attr='Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+                                name='Satellite',
+                                control=False,
+                                show=(st.session_state.map_style == "Satellite")
+                            ).add_to(m)
+
                             for col in gdf_main.columns:
                                 if col != 'geometry': gdf_main[col] = gdf_main[col].astype(str)
                             geojson_data = json.loads(gdf_main.to_json())
-                            folium.GeoJson(geojson_data, style_function=lambda x: {'fillColor': '#003366', 'color': '#003366', 'weight': 2, 'fillOpacity': 0.1}).add_to(m)
+                            folium.GeoJson(
+                                geojson_data, 
+                                style_function=lambda x: {
+                                    'fillColor': '#003366', 
+                                    'color': '#003366' if st.session_state.map_style == "Plan" else 'white', 
+                                    'weight': 3, 
+                                    'fillOpacity': 0.1
+                                }
+                            ).add_to(m)
+                            
                             st_folium(m, width=None, height=450, returned_objects=[], key="map_main", use_container_width=True)
                 
                 with c2:
