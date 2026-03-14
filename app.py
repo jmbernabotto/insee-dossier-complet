@@ -627,11 +627,11 @@ if data:
                                 tiles=None # On gère les tuiles manuellement
                             )
 
-                            # Couche Plan (OSM France)
+                            # Couche Plan (IGN Plan V2 - Plus lisible et institutionnel)
                             folium.TileLayer(
-                                tiles='https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png',
-                                attr='&copy; OpenStreetMap France',
-                                name='Plan',
+                                tiles='https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
+                                attr='&copy; <a href="https://www.ign.fr/">IGN</a> GéoPlateforme',
+                                name='Plan IGN',
                                 control=False,
                                 show=(st.session_state.map_style == "Plan")
                             ).add_to(m)
