@@ -15,7 +15,67 @@ import pynsee
 
 load_dotenv()
 
-st.set_page_config(page_title="Dossier INSEE", layout="wide")
+st.set_page_config(page_title="Dossier INSEE Expert", layout="wide", initial_sidebar_state="expanded")
+
+# --- STYLE CSS PERSONNALISÉ ---
+st.markdown("""
+    <style>
+    /* Global Background and Font */
+    .stApp {
+        background-color: #f8f9fa;
+    }
+    
+    /* Custom Card Style */
+    .metric-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        border-left: 5px solid #003366;
+        margin-bottom: 20px;
+    }
+    
+    .metric-label {
+        color: #6c757d;
+        font-size: 0.9rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        margin-bottom: 5px;
+    }
+    
+    .metric-value {
+        color: #003366;
+        font-size: 1.8rem;
+        font-weight: 700;
+    }
+    
+    /* Sidebar styling */
+    section[data-testid="stSidebar"] {
+        background-color: #003366;
+    }
+    section[data-testid="stSidebar"] .stMarkdown, section[data-testid="stSidebar"] label {
+        color: white !important;
+    }
+    
+    /* Tabs styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 20px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: white;
+        border-radius: 8px 8px 0 0;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #003366 !important;
+        color: white !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 # Configuration Pynsee
 os.environ['insee_key'] = 'dKfEzOwfXe8_Az8K5ZA_pY4MfpYa'
@@ -487,82 +547,108 @@ if data:
             with tab1:
                 indicators = get_territory_indicators(row['CODE'], type_col)
                 
-                # En-tête avec boutons d'accès rapide
-                col_title, col_btns = st.columns([2, 1])
+                # --- EN-TÊTE MODERNISÉ ---
+                col_title, col_btns = st.columns([3, 1])
                 with col_title:
-                    st.write(f"**Type :** {label_type} | **Code :** {row['CODE']}")
+                    st.markdown(f"""
+                    <div style="background-color: white; padding: 20px; border-radius: 12px; border-left: 8px solid #003366; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                        <h1 style='margin: 0; color: #003366; font-size: 2.2rem;'>{row['TITLE']}</h1>
+                        <p style='margin: 0; color: #6c757d; font-weight: 500;'>{label_type} | Code INSEE : <b>{row['CODE']}</b></p>
+                    </div>
+                    """, unsafe_allow_html=True)
                 with col_btns:
                     prefix = "EPCI" if type_col in ["EPCI", "intercommunalites"] else ("COM" if type_col == "communes" else ("DEP" if type_col == "departements" else "REG"))
                     url_insee = f"https://www.insee.fr/fr/statistiques/2011101?geo={prefix}-{row['CODE']}"
-                    st.link_button("📄 Dossier INSEE", url_insee, use_container_width=True)
+                    st.link_button("📄 DOSSIER COMPLET INSEE", url_insee, use_container_width=True, icon="📄")
 
-                st.divider()
+                st.write("") # Spacer
 
-                # Deux colonnes d'indicateurs fondamentaux
-                m1, m2 = st.columns(2)
+                # --- INDICATEURS CLÉS EN CARTES ---
+                m1, m2, m3, m4 = st.columns(4)
                 
                 with m1:
-                    st.subheader("📊 Démographie")
-                    if 'Population' in indicators and not pd.isna(indicators['Population']):
-                        st.metric("Population totale", f"{int(indicators['Population']):,} hab.".replace(',', ' '))
-                    if 'Densité (hab/km²)' in indicators and not pd.isna(indicators['Densité (hab/km²)']):
-                        st.metric("Densité", f"{indicators['Densité (hab/km²)']} hab/km²")
-                    if 'Surface (ha)' in indicators and not pd.isna(indicators['Surface (ha)']):
-                        st.write(f"Surface : {int(indicators['Surface (ha)']):,} ha".replace(',', ' '))
-
-                with m2:
-                    st.subheader("💰 Social & Revenus")
-                    if 'Niveau de vie Médian (€)' in indicators and not pd.isna(indicators['Niveau de vie Médian (€)']):
-                        st.metric("Niveau de vie (médian)", f"{int(indicators['Niveau de vie Médian (€)']):,} €".replace(',', ' '))
-                    if 'Taux de pauvreté (%)' in indicators and not pd.isna(indicators['Taux de pauvreté (%)']):
-                        st.metric("Taux de pauvreté", f"{indicators['Taux de pauvreté (%)']}%")
-                    if "Part des revenus d'activité (%)" in indicators and not pd.isna(indicators["Part des revenus d'activité (%)"]):
-                        val_activite = indicators["Part des revenus d'activité (%)"]
-                        st.caption(f"Revenus d'activité : {val_activite}%")
-
-                st.divider()
+                    with st.container(border=True):
+                        st.caption("👥 Population 2022")
+                        if 'Population' in indicators and not pd.isna(indicators['Population']):
+                            st.subheader(f"{int(indicators['Population']):,} hab.".replace(',', ' '))
+                        else: st.subheader("N/A")
                 
-                # Carte de situation et Assistant
-                c1, c2 = st.columns([1, 1])
+                with m2:
+                    with st.container(border=True):
+                        st.caption("📍 Densité")
+                        if 'Densité (hab/km²)' in indicators and not pd.isna(indicators['Densité (hab/km²)']):
+                            st.subheader(f"{indicators['Densité (hab/km²)']} hab/km²")
+                        else: st.subheader("N/A")
+
+                with m3:
+                    with st.container(border=True):
+                        st.caption("💰 Revenu Médian (2021)")
+                        if 'Niveau de vie Médian (€)' in indicators and not pd.isna(indicators['Niveau de vie Médian (€)']):
+                            st.subheader(f"{int(indicators['Niveau de vie Médian (€)']):,} €".replace(',', ' '))
+                        else: st.subheader("N/A")
+
+                with m4:
+                    with st.container(border=True):
+                        st.caption("🚨 Taux de pauvreté")
+                        if 'Taux de pauvreté (%)' in indicators and not pd.isna(indicators['Taux de pauvreté (%)']):
+                            tp = indicators['Taux de pauvreté (%)']
+                            st.subheader(f"{tp}%")
+                            # Petite barre visuelle
+                            st.progress(min(tp / 30, 1.0)) # 30% est un seuil critique
+                        else: st.subheader("N/A")
+
+                st.write("")
+
+                # --- CARTE ET IA (SECTION COLLABORATIVE) ---
+                c1, c2 = st.columns([3, 2])
                 
                 with c1:
-                    st.subheader("📍 Localisation")
-                    gdf_main = get_geo(row['CODE'], type_col, row['TITLE'])
-                    if gdf_main is not None:
-                        center = gdf_main.to_crs(epsg=3857).centroid.to_crs(epsg=4326).iloc[0]
-                        m = folium.Map(location=[center.y, center.x], zoom_start=7 if type_col in ["regions", "departements"] else 9)
-                        for col in gdf_main.columns:
-                            if col != 'geometry': gdf_main[col] = gdf_main[col].astype(str)
-                        geojson_data = json.loads(gdf_main.to_json())
-                        folium.GeoJson(geojson_data).add_to(m)
-                        st_folium(m, width=500, height=350, returned_objects=[], key="map_main")
+                    with st.container(border=True):
+                        st.markdown("#### 📍 Cartographie du territoire")
+                        gdf_main = get_geo(row['CODE'], type_col, row['TITLE'])
+                        if gdf_main is not None:
+                            center = gdf_main.to_crs(epsg=3857).centroid.to_crs(epsg=4326).iloc[0]
+                            m = folium.Map(location=[center.y, center.x], zoom_start=7 if type_col in ["regions", "departements"] else 11, tiles="cartodbpositron")
+                            for col in gdf_main.columns:
+                                if col != 'geometry': gdf_main[col] = gdf_main[col].astype(str)
+                            geojson_data = json.loads(gdf_main.to_json())
+                            folium.GeoJson(geojson_data, style_function=lambda x: {'fillColor': '#003366', 'color': '#003366', 'weight': 2, 'fillOpacity': 0.1}).add_to(m)
+                            st_folium(m, width=None, height=450, returned_objects=[], key="map_main", use_container_width=True)
                 
                 with c2:
-                    st.subheader(f"💬 Assistant IA")
-                    st.link_button("🗺️ Carte Carroyée (Insee)", "https://www.insee.fr/fr/outil-interactif/7737357/map.html", use_container_width=True)
-                    
-                    if "messages" not in st.session_state or not st.session_state.messages:
-                        st.session_state.messages = [
-                            {"role": "assistant", "content": f"Bonjour ! Je suis votre expert Insee. Posez-moi vos questions sur **{row['TITLE']}**."}
-                        ]
+                    with st.container(border=True):
+                        st.markdown("#### 💬 Assistant IA Expert")
+                        st.caption("Analysez les données avec l'IA")
+                        
+                        if "messages" not in st.session_state or not st.session_state.messages:
+                            st.session_state.messages = [
+                                {"role": "assistant", "content": f"Bonjour ! Je suis votre expert Insee. Posez-moi vos questions sur **{row['TITLE']}**."}
+                            ]
 
-                    # Zone de chat simplifiée
-                    chat_container = st.container()
-                    with chat_container:
-                        for message in st.session_state.messages:
-                            with st.chat_message(message["role"]):
-                                st.markdown(message["content"])
+                        # Zone de chat avec hauteur fixe
+                        chat_area = st.container(height=320)
+                        with chat_area:
+                            for message in st.session_state.messages:
+                                with st.chat_message(message["role"]):
+                                    st.markdown(message["content"])
 
-                    if prompt := st.chat_input(f"Question sur {row['TITLE']}"):
-                        st.session_state.messages.append({"role": "user", "content": prompt})
-                        with chat_container:
-                            with st.chat_message("user"):
-                                st.markdown(prompt)
-                            with st.chat_message("assistant"):
-                                with st.spinner("Réflexion..."):
-                                    response = ask_gemini(prompt, indicators, row['TITLE'])
-                                    st.markdown(response)
-                        st.session_state.messages.append({"role": "assistant", "content": response})
+                        if prompt := st.chat_input(f"Question sur {row['TITLE']}"):
+                            st.session_state.messages.append({"role": "user", "content": prompt})
+                            with chat_area:
+                                with st.chat_message("user"):
+                                    st.markdown(prompt)
+                                with st.chat_message("assistant"):
+                                    with st.spinner("Analyse en cours..."):
+                                        response = ask_gemini(prompt, indicators, row['TITLE'])
+                                        st.markdown(response)
+                            st.session_state.messages.append({"role": "assistant", "content": response})
+
+                st.divider()
+                # Boutons utilitaires en bas
+                b1, b2, b3 = st.columns(3)
+                with b1: st.link_button("🗺️ Outil Insee - Carte Carroyée", "https://www.insee.fr/fr/outil-interactif/7737357/map.html", use_container_width=True)
+                with b2: st.link_button("📊 Statistiques Locales Insee", "https://statistiques-locales.insee.fr/", use_container_width=True)
+                with b3: st.button("📥 Exporter le rapport (PDF)", use_container_width=True, disabled=True, help="Bientôt disponible")
 
             with tab2:
                 if type_col in ["communes"]:
