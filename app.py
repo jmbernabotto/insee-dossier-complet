@@ -605,14 +605,12 @@ if data:
                 with c1:
                     with st.container(border=True):
                         # Sélecteur de vue compact sur la même ligne que le titre
-                        if 'map_is_satellite' not in st.session_state:
-                            st.session_state.map_is_satellite = False
-                        
                         col_map_title, col_map_toggle = st.columns([3, 1])
                         with col_map_title:
                             st.markdown("#### 📍 Cartographie")
                         with col_map_toggle:
-                            st.session_state.map_is_satellite = st.toggle("🛰️ Satellite", value=st.session_state.map_is_satellite)
+                            # Utilisation du paramètre 'key' pour une synchronisation automatique et immédiate
+                            st.toggle("🛰️ Satellite", key='map_is_satellite')
                         
                         st.session_state.map_style = "Satellite" if st.session_state.map_is_satellite else "Plan"
 
