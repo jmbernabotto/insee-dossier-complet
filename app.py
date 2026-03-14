@@ -634,11 +634,11 @@ if data:
                                 show=(st.session_state.map_style == "Plan")
                             ).add_to(m)
 
-                            # Couche Satellite (Esri World Imagery)
+                            # Couche Photographies Aériennes (IGN Orthophoto)
                             folium.TileLayer(
-                                tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                                attr='Esri, Maxar, Earthstar Geographics, and the GIS User Community',
-                                name='Satellite',
+                                tiles='https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg',
+                                attr='&copy; <a href="https://www.ign.fr/">IGN</a> GéoPlateforme',
+                                name='Photos Aériennes',
                                 control=False,
                                 show=(st.session_state.map_style == "Satellite")
                             ).add_to(m)
