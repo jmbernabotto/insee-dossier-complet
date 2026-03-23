@@ -10,3 +10,4 @@ shapely
 numpy
 google-generativeai
 python-dotenv
+playwright

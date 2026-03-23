@@ -9,11 +9,20 @@ from unidecode import unidecode
 from streamlit_folium import st_folium
 import io
 import os
+import subprocess
+import sys
 import google.generativeai as genai
 from dotenv import load_dotenv
 import pynsee
 
 load_dotenv()
+
+@st.cache_resource
+def setup_playwright():
+    """Installe le navigateur Chromium au premier démarrage (Streamlit Cloud)."""
+    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+
+setup_playwright()
 
 st.set_page_config(page_title="Dossier INSEE Expert", layout="wide", initial_sidebar_state="expanded")
 
@@ -90,7 +99,10 @@ if GEMINI_KEY:
 else:
     st.sidebar.error("Clé API Gemini manquante dans le fichier .env")
 
-INSEE_KEY = st.secrets.get("INSEE_API_KEY", "dfc20306-246c-477c-8203-06246c977cba")
+try:
+    INSEE_KEY = st.secrets.get("INSEE_API_KEY", "dfc20306-246c-477c-8203-06246c977cba")
+except Exception:
+    INSEE_KEY = "dfc20306-246c-477c-8203-06246c977cba"
 
 @st.cache_data
 def load_insee(endpt):
@@ -444,6 +456,24 @@ def get_territory_indicators(code, kind):
     
     return indicators
 
+def generate_insee_pdf(url):
+    """Charge la page du dossier INSEE via Playwright et retourne le PDF en bytes."""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(url, wait_until="networkidle", timeout=60000)
+        # Attendre que les graphiques soient chargés
+        page.wait_for_timeout(3000)
+        pdf_bytes = page.pdf(
+            format="A4",
+            print_background=True,
+            margin={"top": "15mm", "bottom": "15mm", "left": "10mm", "right": "10mm"}
+        )
+        browser.close()
+    return pdf_bytes
+
+
 def ask_gemini(prompt, context_data, territory_name):
     """Interroge Gemini avec le contexte du territoire."""
     if not GEMINI_KEY:
@@ -691,7 +721,20 @@ if data:
                 b1, b2, b3 = st.columns(3)
                 with b1: st.link_button("🗺️ Outil Insee - Carte Carroyée", "https://www.insee.fr/fr/outil-interactif/7737357/map.html", use_container_width=True)
                 with b2: st.link_button("📊 Statistiques Locales Insee", "https://statistiques-locales.insee.fr/", use_container_width=True)
-                with b3: st.button("📥 Exporter le rapport (PDF)", use_container_width=True, disabled=True, help="Bientôt disponible")
+                with b3:
+                    if st.button("📥 Exporter le rapport (PDF)", use_container_width=True):
+                        with st.spinner("Génération du PDF en cours (30-60 sec)..."):
+                            try:
+                                pdf_bytes = generate_insee_pdf(url_insee)
+                                st.download_button(
+                                    label="⬇️ Télécharger le rapport PDF",
+                                    data=pdf_bytes,
+                                    file_name=f"dossier_insee_{row['CODE']}.pdf",
+                                    mime="application/pdf",
+                                    use_container_width=True
+                                )
+                            except Exception as e:
+                                st.error(f"Erreur lors de la génération du PDF : {e}")
 
             with tab2:
                 if type_col in ["communes"]:
