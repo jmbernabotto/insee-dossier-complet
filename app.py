@@ -9,20 +9,12 @@ from unidecode import unidecode
 from streamlit_folium import st_folium
 import io
 import os
-import subprocess
-import sys
+import datetime
 import google.generativeai as genai
 from dotenv import load_dotenv
 import pynsee
 
 load_dotenv()
-
-@st.cache_resource
-def setup_playwright():
-    """Installe le navigateur Chromium au premier démarrage (Streamlit Cloud)."""
-    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-
-setup_playwright()
 
 st.set_page_config(page_title="Dossier INSEE Expert", layout="wide", initial_sidebar_state="expanded")
 
@@ -456,29 +448,157 @@ def get_territory_indicators(code, kind):
     
     return indicators
 
-def generate_insee_pdf(url):
-    """Charge la page du dossier INSEE via Playwright et retourne le PDF en bytes."""
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as p:
-        browser = p.chromium.launch(args=[
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-            "--disable-software-rasterizer",
-            "--disable-extensions",
-        ])
-        page = browser.new_page()
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        # Attendre que les graphiques soient rendus
-        page.wait_for_timeout(5000)
-        pdf_bytes = page.pdf(
-            format="A4",
-            print_background=True,
-            margin={"top": "15mm", "bottom": "15mm", "left": "10mm", "right": "10mm"}
-        )
-        browser.close()
-    return pdf_bytes
+def generate_insee_pdf(title, code, type_label, url_insee, indicators):
+    """Génère un rapport PDF structuré depuis les données INSEE chargées."""
+    from fpdf import FPDF
+
+    BLUE = (0, 51, 102)
+    LIGHT_BLUE = (230, 236, 245)
+    GREY = (108, 117, 125)
+    BLACK = (30, 30, 30)
+
+    # Groupes thématiques d'indicateurs
+    SECTIONS = {
+        "Population & Territoire": [
+            "Population", "Surface (ha)", "Densité (hab/km²)", "Code Département"
+        ],
+        "Revenus & Niveau de vie": [
+            "Niveau de vie Médian (€)", "Niveau de vie D1 (€)", "Niveau de vie D9 (€)",
+            "Rapport Interdécile (D9/D1)", "Part des bas revenus (%)"
+        ],
+        "Pauvreté & Précarité": [
+            "Taux de pauvreté (%)", "Intensité de la pauvreté (%)",
+            "Part des allocataires CAF (%)", "Part des foyers fiscaux imposés (%)"
+        ],
+        "Logement": [
+            "Part des propriétaires (%)", "Part des locataires HLM (%)",
+            "Part des résidences secondaires (%)", "Part des logements vacants (%)"
+        ],
+        "Emploi & Activité": [
+            "Taux de chômage (%)", "Part des actifs (%)",
+            "Part des cadres (%)", "Part des ouvriers (%)"
+        ],
+    }
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    # --- EN-TÊTE ---
+    pdf.set_fill_color(*BLUE)
+    pdf.rect(0, 0, 210, 38, 'F')
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.set_xy(10, 8)
+    pdf.cell(0, 10, "DOSSIER INSEE", ln=True)
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_x(10)
+    pdf.cell(0, 8, title, ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_x(10)
+    pdf.cell(0, 6, f"{type_label}  |  Code INSEE : {code}", ln=True)
+
+    # Date + lien
+    pdf.set_xy(10, 45)
+    pdf.set_text_color(*GREY)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 5, f"Rapport généré le {datetime.date.today().strftime('%d/%m/%Y')}  —  Source : INSEE", ln=True)
+    pdf.set_text_color(0, 102, 204)
+    pdf.set_x(10)
+    pdf.cell(0, 5, f"Dossier complet : {url_insee}", ln=False, link=url_insee)
+    pdf.ln(12)
+
+    # --- INDICATEURS CLÉS (4 métriques en bandeau) ---
+    KEY_METRICS = [
+        ("Population 2022", "Population", "{:,.0f} hab."),
+        ("Densite (hab/km2)", "Densité (hab/km²)", "{} hab/km2"),
+        ("Revenu median", "Niveau de vie Médian (€)", "{:,.0f} EUR"),
+        ("Taux de pauvrete", "Taux de pauvreté (%)", "{}%"),
+    ]
+    pdf.set_fill_color(*LIGHT_BLUE)
+    pdf.set_draw_color(*BLUE)
+    col_w = 46
+    x_start = 10
+    for i, (label, key, fmt) in enumerate(KEY_METRICS):
+        x = x_start + i * (col_w + 2)
+        pdf.set_xy(x, pdf.get_y())
+        y = pdf.get_y()
+        pdf.rect(x, y, col_w, 22, 'FD')
+        pdf.set_text_color(*GREY)
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_xy(x + 2, y + 2)
+        pdf.cell(col_w - 4, 4, label.upper(), ln=False)
+        val = indicators.get(key)
+        try:
+            display = fmt.format(val) if val is not None and not (isinstance(val, float) and np.isnan(val)) else "N/D"
+        except Exception:
+            display = str(val) if val is not None else "N/D"
+        pdf.set_text_color(*BLUE)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_xy(x + 2, y + 8)
+        pdf.cell(col_w - 4, 8, display, ln=False)
+    pdf.ln(30)
+
+    # --- SECTIONS THÉMATIQUES ---
+    for section_title, keys in SECTIONS.items():
+        available = {k: indicators[k] for k in keys if k in indicators and indicators[k] is not None}
+        if not available:
+            continue
+
+        # Titre de section
+        pdf.set_fill_color(*BLUE)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 8, f"  {section_title}", ln=True, fill=True)
+        pdf.ln(2)
+
+        # Lignes d'indicateurs (2 colonnes)
+        items = list(available.items())
+        col_w2 = 93
+        for j in range(0, len(items), 2):
+            row_items = items[j:j+2]
+            y_row = pdf.get_y()
+            for k, (ind_key, ind_val) in enumerate(row_items):
+                x = 10 + k * (col_w2 + 4)
+                # Fond alterné
+                if (j // 2) % 2 == 0:
+                    pdf.set_fill_color(245, 247, 250)
+                else:
+                    pdf.set_fill_color(255, 255, 255)
+                pdf.set_xy(x, y_row)
+                pdf.set_draw_color(220, 220, 220)
+                pdf.rect(x, y_row, col_w2, 8, 'FD')
+                # Label
+                pdf.set_text_color(*GREY)
+                pdf.set_font("Helvetica", "", 8)
+                pdf.set_xy(x + 2, y_row + 1)
+                pdf.cell(65, 4, str(ind_key)[:45], ln=False)
+                # Valeur
+                pdf.set_text_color(*BLACK)
+                pdf.set_font("Helvetica", "B", 9)
+                try:
+                    if isinstance(ind_val, float) and not np.isnan(ind_val):
+                        val_str = f"{ind_val:,.1f}".replace(",", " ")
+                    elif isinstance(ind_val, int):
+                        val_str = f"{ind_val:,}".replace(",", " ")
+                    else:
+                        val_str = str(ind_val)
+                except Exception:
+                    val_str = str(ind_val)
+                pdf.set_xy(x + 67, y_row + 1)
+                pdf.cell(col_w2 - 69, 4, val_str, ln=False, align="R")
+            pdf.ln(8)
+        pdf.ln(4)
+
+    # --- PIED DE PAGE ---
+    pdf.set_y(-20)
+    pdf.set_draw_color(*BLUE)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.set_text_color(*GREY)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.cell(0, 8, "Source : INSEE — Données FILOSOFI, Recensement de la population. Rapport généré automatiquement.", align="C")
+
+    return pdf.output()
 
 
 def ask_gemini(prompt, context_data, territory_name):
@@ -730,12 +850,18 @@ if data:
                 with b2: st.link_button("📊 Statistiques Locales Insee", "https://statistiques-locales.insee.fr/", use_container_width=True)
                 with b3:
                     if st.button("📥 Exporter le rapport (PDF)", use_container_width=True):
-                        with st.spinner("Génération du PDF en cours (30-60 sec)..."):
+                        with st.spinner("Génération du PDF..."):
                             try:
-                                pdf_bytes = generate_insee_pdf(url_insee)
+                                pdf_bytes = generate_insee_pdf(
+                                    title=row['TITLE'],
+                                    code=row['CODE'],
+                                    type_label=label_type,
+                                    url_insee=url_insee,
+                                    indicators=indicators
+                                )
                                 st.download_button(
                                     label="⬇️ Télécharger le rapport PDF",
-                                    data=pdf_bytes,
+                                    data=bytes(pdf_bytes),
                                     file_name=f"dossier_insee_{row['CODE']}.pdf",
                                     mime="application/pdf",
                                     use_container_width=True
