@@ -457,155 +457,305 @@ def pdf_safe(text):
     return unidecode(text)
 
 
-def generate_insee_pdf(title, code, type_label, url_insee, indicators):
-    """Génère un rapport PDF structuré depuis les données INSEE chargées."""
-    from fpdf import FPDF
+@st.cache_data
+def fetch_pdf_data(code, kind, insee_key):
+    """Récupère les données étendues pour le rapport PDF (FILOSOFI + géo)."""
+    data = {}
+    prefix_map = {"communes": "COM", "EPCI": "EPCI", "intercommunalites": "EPCI",
+                  "departements": "DEP", "regions": "REG"}
+    prefix = prefix_map.get(kind)
 
-    BLUE = (0, 51, 102)
-    LIGHT_BLUE = (230, 236, 245)
+    if prefix:
+        measure_map = {
+            'MED_SL':         'Niveau de vie median (EUR/an)',
+            'D1_SL':          'Niveau de vie D1 - 10pct les plus modestes (EUR/an)',
+            'D9_SL':          'Niveau de vie D9 - 10pct les plus aises (EUR/an)',
+            'IR_D9_D1_SL':    'Rapport interdecile D9/D1',
+            'GI':             'Indice de Gini',
+            'PR_MD60':        'Taux de pauvrete a 60pct (%)',
+            'TP60EI':         'Taux de pauvrete des personnes en emploi (%)',
+            'S_EI_DI':        'Part des revenus d activite (%)',
+            'S_TR_DI':        'Part des prestations sociales (%)',
+            'S_PAT_DI':       'Part des revenus du patrimoine (%)',
+            'NBMENFISC':      'Nombre de menages fiscaux',
+            'NBPERSMENFISC':  'Nombre de personnes (menages fiscaux)',
+        }
+        try:
+            url = f"https://api.insee.fr/melodi/data/DS_FILOSOFI_CC?GEO={prefix}-{code}"
+            h = {"Authorization": f"Bearer {insee_key}", "Accept": "application/json"}
+            r = requests.get(url, headers=h, timeout=15)
+            if r.status_code == 200:
+                for obs in r.json().get("observations", []):
+                    mid = obs.get("dimensions", {}).get("FILOSOFI_MEASURE")
+                    if mid in measure_map:
+                        val = obs.get("measures", {}).get("OBS_VALUE_NIVEAU", {}).get("value")
+                        if val is not None:
+                            data[measure_map[mid]] = val
+        except Exception as e:
+            print(f"fetch_pdf_data FILOSOFI error: {e}")
+
+    geo_map = {"communes": "communes", "EPCI": "epcis", "intercommunalites": "epcis",
+               "departements": "departements", "regions": "regions"}
+    api_kind = geo_map.get(kind)
+    if api_kind:
+        try:
+            r = requests.get(
+                f"https://geo.api.gouv.fr/{api_kind}/{code}"
+                "?fields=population,surface,codesPostaux,codeDepartement,codeRegion",
+                timeout=10
+            )
+            if r.status_code == 200:
+                geo = r.json()
+                if 'surface' in geo:
+                    data['Surface (km2)'] = round(geo['surface'] / 100, 1)
+                if 'codesPostaux' in geo:
+                    data['Code(s) postal(aux)'] = ', '.join(geo['codesPostaux'])
+                if 'codeDepartement' in geo:
+                    data['Departement (code)'] = geo['codeDepartement']
+                if 'codeRegion' in geo:
+                    data['Region (code)'] = geo['codeRegion']
+        except Exception as e:
+            print(f"fetch_pdf_data geo error: {e}")
+
+    return data
+
+
+def _pdf_row(pdf, label, value, fill, col_w=190):
+    """Affiche une ligne label/valeur dans le PDF."""
     GREY = (108, 117, 125)
     BLACK = (30, 30, 30)
+    bg = (245, 247, 250) if fill else (255, 255, 255)
+    pdf.set_fill_color(*bg)
+    pdf.set_draw_color(220, 220, 220)
+    y = pdf.get_y()
+    pdf.rect(10, y, col_w, 7, 'FD')
+    pdf.set_text_color(*GREY)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_xy(12, y + 1.5)
+    pdf.cell(120, 4, pdf_safe(str(label))[:60], ln=False)
+    pdf.set_text_color(*BLACK)
+    pdf.set_font("Helvetica", "B", 8)
+    try:
+        if isinstance(value, float) and not np.isnan(value):
+            val_str = f"{value:,.2f}".replace(",", " ")
+        elif isinstance(value, int):
+            val_str = f"{value:,}".replace(",", " ")
+        else:
+            val_str = pdf_safe(str(value))
+    except Exception:
+        val_str = pdf_safe(str(value))
+    pdf.set_xy(132, y + 1.5)
+    pdf.cell(66, 4, val_str, ln=False, align="R")
+    pdf.ln(7)
 
-    # Groupes thématiques d'indicateurs
-    SECTIONS = {
-        "Population & Territoire": [
-            "Population", "Surface (ha)", "Densité (hab/km²)", "Code Département"
-        ],
-        "Revenus & Niveau de vie": [
-            "Niveau de vie Médian (€)", "Niveau de vie D1 (€)", "Niveau de vie D9 (€)",
-            "Rapport Interdécile (D9/D1)", "Part des bas revenus (%)"
-        ],
-        "Pauvreté & Précarité": [
-            "Taux de pauvreté (%)", "Intensité de la pauvreté (%)",
-            "Part des allocataires CAF (%)", "Part des foyers fiscaux imposés (%)"
-        ],
-        "Logement": [
-            "Part des propriétaires (%)", "Part des locataires HLM (%)",
-            "Part des résidences secondaires (%)", "Part des logements vacants (%)"
-        ],
-        "Emploi & Activité": [
-            "Taux de chômage (%)", "Part des actifs (%)",
-            "Part des cadres (%)", "Part des ouvriers (%)"
-        ],
+
+def _pdf_section(pdf, title):
+    """Affiche un bandeau de titre de section."""
+    BLUE = (0, 51, 102)
+    pdf.ln(3)
+    pdf.set_fill_color(*BLUE)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 7, pdf_safe(f"  {title}"), ln=True, fill=True)
+    pdf.ln(1)
+
+
+def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messages=None):
+    """Génère un rapport PDF multi-pages depuis les données INSEE et FILOSOFI."""
+    from fpdf import FPDF
+
+    BLUE  = (0, 51, 102)
+    GREY  = (108, 117, 125)
+    LIGHT = (230, 236, 245)
+
+    # Données étendues (on reconstitue le kind technique depuis type_label)
+    _label_to_kind = {
+        "Communes": "communes", "EPCI (Intercommunalités)": "intercommunalites",
+        "Départements": "departements", "Régions": "regions",
+        "Arrondissements": "arrondissements",
+        "Arrondissements Municipaux (Paris, Lyon, Marseille)": "arrondissementsMunicipaux",
+        "Communes Associées / Déléguées": "communesDeleguees",
     }
+    _kind = _label_to_kind.get(type_label, "communes")
+    extended = fetch_pdf_data(code, _kind, INSEE_KEY)
+    # Fusion : indicators en priorité
+    all_data = {**extended, **{k: v for k, v in indicators.items() if v is not None}}
 
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    class ReportPDF(FPDF):
+        def header(self):
+            self.set_fill_color(*BLUE)
+            self.rect(0, 0, 210, 12, 'F')
+            self.set_text_color(255, 255, 255)
+            self.set_font("Helvetica", "B", 9)
+            self.set_xy(10, 2)
+            self.cell(130, 8, pdf_safe(f"DOSSIER INSEE - {title}"), ln=False)
+            self.set_font("Helvetica", "", 8)
+            self.set_xy(140, 2)
+            self.cell(60, 8, pdf_safe(f"Code : {code}  |  {type_label}"), ln=False, align="R")
+            self.ln(14)
+
+        def footer(self):
+            self.set_y(-12)
+            self.set_draw_color(*BLUE)
+            self.line(10, self.get_y(), 200, self.get_y())
+            self.set_text_color(*GREY)
+            self.set_font("Helvetica", "I", 7)
+            self.cell(95, 6, f"Source : INSEE - FILOSOFI 2021, Recensement de la population 2022", ln=False)
+            self.cell(95, 6, f"Page {self.page_no()}", align="R")
+
+    pdf = ReportPDF()
+    pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
 
-    # --- EN-TÊTE ---
+    # ── PAGE DE GARDE ──────────────────────────────────────────────
     pdf.set_fill_color(*BLUE)
-    pdf.rect(0, 0, 210, 38, 'F')
+    pdf.rect(0, 14, 210, 55, 'F')
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 20)
-    pdf.set_xy(10, 8)
-    pdf.cell(0, 10, "DOSSIER INSEE", ln=True)
-    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_font("Helvetica", "B", 26)
+    pdf.set_xy(10, 20)
+    pdf.cell(0, 12, "DOSSIER STATISTIQUE", ln=True)
+    pdf.set_font("Helvetica", "B", 18)
     pdf.set_x(10)
-    pdf.cell(0, 8, pdf_safe(title), ln=True)
-    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 10, pdf_safe(title), ln=True)
+    pdf.set_font("Helvetica", "", 11)
     pdf.set_x(10)
-    pdf.cell(0, 6, pdf_safe(f"{type_label}  |  Code INSEE : {code}"), ln=True)
-
-    # Date + lien
-    pdf.set_xy(10, 45)
-    pdf.set_text_color(*GREY)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, f"Rapport genere le {datetime.date.today().strftime('%d/%m/%Y')} - Source : INSEE", ln=True)
-    pdf.set_text_color(0, 102, 204)
+    pdf.cell(0, 7, pdf_safe(f"{type_label}  |  Code INSEE : {code}"), ln=True)
+    pdf.set_font("Helvetica", "I", 9)
     pdf.set_x(10)
-    pdf.cell(0, 5, f"Dossier complet : {url_insee}", ln=False, link=url_insee)
-    pdf.ln(12)
-
-    # --- INDICATEURS CLÉS (4 métriques en bandeau) ---
-    KEY_METRICS = [
-        ("Population 2022", "Population", "{:,.0f} hab."),
-        ("Densite (hab/km2)", "Densité (hab/km²)", "{} hab/km2"),
-        ("Revenu median", "Niveau de vie Médian (€)", "{:,.0f} EUR"),
-        ("Taux de pauvrete", "Taux de pauvreté (%)", "{}%"),
-    ]
-    pdf.set_fill_color(*LIGHT_BLUE)
-    pdf.set_draw_color(*BLUE)
-    col_w = 46
-    x_start = 10
-    for i, (label, key, fmt) in enumerate(KEY_METRICS):
-        x = x_start + i * (col_w + 2)
-        pdf.set_xy(x, pdf.get_y())
-        y = pdf.get_y()
-        pdf.rect(x, y, col_w, 22, 'FD')
-        pdf.set_text_color(*GREY)
-        pdf.set_font("Helvetica", "", 7)
-        pdf.set_xy(x + 2, y + 2)
-        pdf.cell(col_w - 4, 4, label.upper(), ln=False)
-        val = indicators.get(key)
-        try:
-            display = pdf_safe(fmt.format(val)) if val is not None and not (isinstance(val, float) and np.isnan(val)) else "N/D"
-        except Exception:
-            display = pdf_safe(str(val)) if val is not None else "N/D"
-        pdf.set_text_color(*BLUE)
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.set_xy(x + 2, y + 8)
-        pdf.cell(col_w - 4, 8, display, ln=False)
+    pdf.cell(0, 6, f"Rapport genere le {datetime.date.today().strftime('%d/%m/%Y')}", ln=True)
     pdf.ln(30)
 
-    # --- SECTIONS THÉMATIQUES ---
-    for section_title, keys in SECTIONS.items():
-        available = {k: indicators[k] for k in keys if k in indicators and indicators[k] is not None}
-        if not available:
-            continue
+    # Lien dossier complet
+    pdf.set_text_color(0, 51, 102)
+    pdf.set_font("Helvetica", "U", 9)
+    pdf.set_x(10)
+    pdf.cell(0, 6, "Consulter le dossier complet sur le site de l'INSEE", ln=True, link=url_insee)
+    pdf.ln(6)
 
-        # Titre de section
-        pdf.set_fill_color(*BLUE)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.cell(0, 8, pdf_safe(f"  {section_title}"), ln=True, fill=True)
-        pdf.ln(2)
-
-        # Lignes d'indicateurs (2 colonnes)
-        items = list(available.items())
-        col_w2 = 93
-        for j in range(0, len(items), 2):
-            row_items = items[j:j+2]
-            y_row = pdf.get_y()
-            for k, (ind_key, ind_val) in enumerate(row_items):
-                x = 10 + k * (col_w2 + 4)
-                # Fond alterné
-                if (j // 2) % 2 == 0:
-                    pdf.set_fill_color(245, 247, 250)
-                else:
-                    pdf.set_fill_color(255, 255, 255)
-                pdf.set_xy(x, y_row)
-                pdf.set_draw_color(220, 220, 220)
-                pdf.rect(x, y_row, col_w2, 8, 'FD')
-                # Label
-                pdf.set_text_color(*GREY)
-                pdf.set_font("Helvetica", "", 8)
-                pdf.set_xy(x + 2, y_row + 1)
-                pdf.cell(65, 4, pdf_safe(str(ind_key))[:45], ln=False)
-                # Valeur
-                pdf.set_text_color(*BLACK)
-                pdf.set_font("Helvetica", "B", 9)
-                try:
-                    if isinstance(ind_val, float) and not np.isnan(ind_val):
-                        val_str = f"{ind_val:,.1f}".replace(",", " ")
-                    elif isinstance(ind_val, int):
-                        val_str = f"{ind_val:,}".replace(",", " ")
-                    else:
-                        val_str = pdf_safe(str(ind_val))
-                except Exception:
-                    val_str = pdf_safe(str(ind_val))
-                pdf.set_xy(x + 67, y_row + 1)
-                pdf.cell(col_w2 - 69, 4, val_str, ln=False, align="R")
-            pdf.ln(8)
-        pdf.ln(4)
-
-    # --- PIED DE PAGE ---
-    pdf.set_y(-20)
+    # ── BANDEAU 4 INDICATEURS CLÉS ─────────────────────────────────
+    KEY_METRICS = [
+        ("Population 2022", "Population", lambda v: f"{int(v):,} hab.".replace(",", " ")),
+        ("Densite", "Densité (hab/km²)", lambda v: f"{v} hab/km2"),
+        ("Revenu median", "Niveau de vie median (EUR/an)", lambda v: f"{int(v):,} EUR/an".replace(",", " ")),
+        ("Taux de pauvrete", "Taux de pauvreté (%)", lambda v: f"{v} %"),
+    ]
     pdf.set_draw_color(*BLUE)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.set_text_color(*GREY)
+    col_w = 46
+    y_band = pdf.get_y()
+    for i, (label, key, fmt) in enumerate(KEY_METRICS):
+        x = 10 + i * (col_w + 2)
+        pdf.set_fill_color(*LIGHT)
+        pdf.rect(x, y_band, col_w, 24, 'FD')
+        pdf.set_text_color(*GREY)
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_xy(x + 2, y_band + 2)
+        pdf.cell(col_w - 4, 4, label.upper())
+        val = all_data.get(key)
+        try:
+            display = pdf_safe(fmt(val)) if val is not None and not (isinstance(val, float) and np.isnan(val)) else "N/D"
+        except Exception:
+            display = "N/D"
+        pdf.set_text_color(*BLUE)
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_xy(x + 2, y_band + 9)
+        pdf.cell(col_w - 4, 8, display)
+    pdf.ln(32)
+
+    # ── SECTION 1 : TERRITOIRE ────────────────────────────────────
+    _pdf_section(pdf, "1. Presentation du territoire")
+    territoire_keys = [
+        "Population", "Densité (hab/km²)", "Surface (km2)",
+        "Code(s) postal(aux)", "Departement (code)", "Region (code)", "Code Département",
+    ]
+    for i, k in enumerate(territoire_keys):
+        if k in all_data:
+            _pdf_row(pdf, k, all_data[k], i % 2 == 0)
+
+    # ── SECTION 2 : REVENUS & NIVEAU DE VIE ──────────────────────
+    _pdf_section(pdf, "2. Revenus et niveau de vie (FILOSOFI 2021)")
+    revenus_keys = [
+        "Niveau de vie median (EUR/an)",
+        "Niveau de vie D1 - 10pct les plus modestes (EUR/an)",
+        "Niveau de vie D9 - 10pct les plus aises (EUR/an)",
+        "Rapport interdecile D9/D1",
+        "Indice de Gini",
+        "Part des revenus d activite (%)",
+        "Part des prestations sociales (%)",
+        "Part des revenus du patrimoine (%)",
+        "Rapport Interdécile (D9/D1)",
+        "Part des revenus d'activité (%)",
+        "Niveau de vie Médian (€)",
+    ]
+    found = 0
+    for i, k in enumerate(revenus_keys):
+        if k in all_data:
+            _pdf_row(pdf, k, all_data[k], i % 2 == 0)
+            found += 1
+    if found == 0:
+        pdf.set_text_color(*GREY)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.cell(0, 6, "  Donnees non disponibles pour ce territoire.", ln=True)
+
+    # ── SECTION 3 : PAUVRETÉ ─────────────────────────────────────
+    _pdf_section(pdf, "3. Pauvrete et precarite (FILOSOFI 2021)")
+    pauvrete_keys = [
+        "Taux de pauvreté (%)",
+        "Taux de pauvrete a 60pct (%)",
+        "Taux de pauvrete des personnes en emploi (%)",
+        "Nombre de menages fiscaux",
+        "Nombre de personnes (menages fiscaux)",
+    ]
+    found = 0
+    for i, k in enumerate(pauvrete_keys):
+        if k in all_data:
+            _pdf_row(pdf, k, all_data[k], i % 2 == 0)
+            found += 1
+    if found == 0:
+        pdf.set_text_color(*GREY)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.cell(0, 6, "  Donnees non disponibles pour ce territoire.", ln=True)
+
+    # ── SECTION 4 : TOUTES LES AUTRES DONNÉES ────────────────────
+    already_shown = set(territoire_keys + revenus_keys + pauvrete_keys +
+                        ["URL Dossier INSEE", "Surface (ha)"])
+    remaining = {k: v for k, v in all_data.items()
+                 if k not in already_shown and v is not None}
+    if remaining:
+        _pdf_section(pdf, "4. Donnees complementaires")
+        for i, (k, v) in enumerate(remaining.items()):
+            _pdf_row(pdf, k, v, i % 2 == 0)
+
+    # ── SECTION 5 : ANALYSE IA (si disponible) ───────────────────
+    if ai_messages:
+        exchanges = [(m['content'], m['role']) for m in ai_messages
+                     if m['role'] in ('user', 'assistant') and
+                     not m['content'].startswith("Bonjour !")]
+        if exchanges:
+            pdf.add_page()
+            _pdf_section(pdf, "5. Analyse de l'assistant IA")
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_text_color(30, 30, 30)
+            for content, role in exchanges:
+                prefix_label = "Question : " if role == "user" else "Reponse : "
+                pdf.set_font("Helvetica", "B", 8)
+                pdf.set_x(10)
+                pdf.cell(0, 5, pdf_safe(prefix_label), ln=True)
+                pdf.set_font("Helvetica", "", 8)
+                pdf.set_x(14)
+                pdf.multi_cell(186, 5, pdf_safe(content))
+                pdf.ln(2)
+
+    # ── NOTE DE BAS DE RAPPORT ────────────────────────────────────
+    pdf.ln(6)
+    pdf.set_fill_color(*LIGHT)
+    pdf.set_text_color(0, 51, 102)
     pdf.set_font("Helvetica", "I", 8)
-    pdf.cell(0, 8, "Source : INSEE - Donnees FILOSOFI, Recensement de la population. Rapport genere automatiquement.", align="C")
+    pdf.set_x(10)
+    pdf.multi_cell(190, 5,
+        "Ce rapport a ete genere automatiquement a partir des donnees "
+        "officielles de l'INSEE (FILOSOFI 2021, Recensement de la population 2022, "
+        "API Melodi). Pour acceder au dossier complet interactif avec graphiques et "
+        "tableaux detailles, consultez le lien en page 1.", fill=True)
 
     return pdf.output()
 
@@ -866,7 +1016,8 @@ if data:
                                     code=row['CODE'],
                                     type_label=label_type,
                                     url_insee=url_insee,
-                                    indicators=indicators
+                                    indicators=indicators,
+                                    ai_messages=st.session_state.get("messages", [])
                                 )
                                 st.download_button(
                                     label="⬇️ Télécharger le rapport PDF",
