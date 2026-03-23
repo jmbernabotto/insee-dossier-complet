@@ -462,9 +462,11 @@ def generate_insee_pdf(url):
     with sync_playwright() as p:
         browser = p.chromium.launch(args=[
             "--no-sandbox",
+            "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
-            "--single-process",
+            "--disable-software-rasterizer",
+            "--disable-extensions",
         ])
         page = browser.new_page()
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
