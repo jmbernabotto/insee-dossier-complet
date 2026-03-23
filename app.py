@@ -502,7 +502,7 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators):
     pdf.set_xy(10, 45)
     pdf.set_text_color(*GREY)
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, f"Rapport généré le {datetime.date.today().strftime('%d/%m/%Y')}  —  Source : INSEE", ln=True)
+    pdf.cell(0, 5, f"Rapport genere le {datetime.date.today().strftime('%d/%m/%Y')} - Source : INSEE", ln=True)
     pdf.set_text_color(0, 102, 204)
     pdf.set_x(10)
     pdf.cell(0, 5, f"Dossier complet : {url_insee}", ln=False, link=url_insee)
@@ -596,7 +596,7 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators):
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.set_text_color(*GREY)
     pdf.set_font("Helvetica", "I", 8)
-    pdf.cell(0, 8, "Source : INSEE — Données FILOSOFI, Recensement de la population. Rapport généré automatiquement.", align="C")
+    pdf.cell(0, 8, "Source : INSEE - Donnees FILOSOFI, Recensement de la population. Rapport genere automatiquement.", align="C")
 
     return pdf.output()
 
