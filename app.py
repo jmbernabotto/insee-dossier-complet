@@ -460,11 +460,16 @@ def generate_insee_pdf(url):
     """Charge la page du dossier INSEE via Playwright et retourne le PDF en bytes."""
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = p.chromium.launch(args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--single-process",
+        ])
         page = browser.new_page()
-        page.goto(url, wait_until="networkidle", timeout=60000)
-        # Attendre que les graphiques soient chargés
-        page.wait_for_timeout(3000)
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        # Attendre que les graphiques soient rendus
+        page.wait_for_timeout(5000)
         pdf_bytes = page.pdf(
             format="A4",
             print_background=True,
