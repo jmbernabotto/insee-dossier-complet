@@ -448,6 +448,15 @@ def get_territory_indicators(code, kind):
     
     return indicators
 
+def pdf_safe(text):
+    """Remplace les caractères hors Latin-1 par des équivalents ASCII pour fpdf2/Helvetica."""
+    replacements = {"€": "EUR", "—": "-", "–": "-", "…": "...", "\u2019": "'", "\u2018": "'",
+                    "\u201c": '"', "\u201d": '"', "°": " deg", "²": "2", "³": "3"}
+    for char, repl in replacements.items():
+        text = str(text).replace(char, repl)
+    return unidecode(text)
+
+
 def generate_insee_pdf(title, code, type_label, url_insee, indicators):
     """Génère un rapport PDF structuré depuis les données INSEE chargées."""
     from fpdf import FPDF
@@ -493,10 +502,10 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators):
     pdf.cell(0, 10, "DOSSIER INSEE", ln=True)
     pdf.set_font("Helvetica", "B", 14)
     pdf.set_x(10)
-    pdf.cell(0, 8, title, ln=True)
+    pdf.cell(0, 8, pdf_safe(title), ln=True)
     pdf.set_font("Helvetica", "", 10)
     pdf.set_x(10)
-    pdf.cell(0, 6, f"{type_label}  |  Code INSEE : {code}", ln=True)
+    pdf.cell(0, 6, pdf_safe(f"{type_label}  |  Code INSEE : {code}"), ln=True)
 
     # Date + lien
     pdf.set_xy(10, 45)
@@ -530,9 +539,9 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators):
         pdf.cell(col_w - 4, 4, label.upper(), ln=False)
         val = indicators.get(key)
         try:
-            display = fmt.format(val) if val is not None and not (isinstance(val, float) and np.isnan(val)) else "N/D"
+            display = pdf_safe(fmt.format(val)) if val is not None and not (isinstance(val, float) and np.isnan(val)) else "N/D"
         except Exception:
-            display = str(val) if val is not None else "N/D"
+            display = pdf_safe(str(val)) if val is not None else "N/D"
         pdf.set_text_color(*BLUE)
         pdf.set_font("Helvetica", "B", 12)
         pdf.set_xy(x + 2, y + 8)
@@ -549,7 +558,7 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators):
         pdf.set_fill_color(*BLUE)
         pdf.set_text_color(255, 255, 255)
         pdf.set_font("Helvetica", "B", 11)
-        pdf.cell(0, 8, f"  {section_title}", ln=True, fill=True)
+        pdf.cell(0, 8, pdf_safe(f"  {section_title}"), ln=True, fill=True)
         pdf.ln(2)
 
         # Lignes d'indicateurs (2 colonnes)
@@ -572,7 +581,7 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators):
                 pdf.set_text_color(*GREY)
                 pdf.set_font("Helvetica", "", 8)
                 pdf.set_xy(x + 2, y_row + 1)
-                pdf.cell(65, 4, str(ind_key)[:45], ln=False)
+                pdf.cell(65, 4, pdf_safe(str(ind_key))[:45], ln=False)
                 # Valeur
                 pdf.set_text_color(*BLACK)
                 pdf.set_font("Helvetica", "B", 9)
@@ -582,9 +591,9 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators):
                     elif isinstance(ind_val, int):
                         val_str = f"{ind_val:,}".replace(",", " ")
                     else:
-                        val_str = str(ind_val)
+                        val_str = pdf_safe(str(ind_val))
                 except Exception:
-                    val_str = str(ind_val)
+                    val_str = pdf_safe(str(ind_val))
                 pdf.set_xy(x + 67, y_row + 1)
                 pdf.cell(col_w2 - 69, 4, val_str, ln=False, align="R")
             pdf.ln(8)
