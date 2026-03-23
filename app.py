@@ -520,6 +520,66 @@ def fetch_pdf_data(code, kind, insee_key):
     return data
 
 
+@st.cache_data
+def fetch_demographic_data(code, kind):
+    """Récupère la structure démographique (âge, sexe) via pynsee RP 2018."""
+    nivgeo_map = {
+        "communes": "COM", "EPCI": "EPCI", "intercommunalites": "EPCI",
+        "departements": "DEP", "regions": "REG",
+    }
+    nivgeo = nivgeo_map.get(kind)
+    if not nivgeo:
+        return {}
+
+    result = {}
+    try:
+        df = pynsee.get_local_data(
+            dataset_version='GEO2021RP2018',
+            nivgeo=nivgeo,
+            geocodes=[code],
+            variables='SEXE-AGE15_15_90'
+        )
+        if df is None or df.empty:
+            return {}
+
+        AGE_LABELS = {
+            '00': '0-14 ans', '15': '15-29 ans', '30': '30-44 ans',
+            '45': '45-59 ans', '60': '60-74 ans', '75': '75-89 ans', '90': '90 ans et plus',
+        }
+        age_col = next((c for c in df.columns if 'AGE' in c.upper()), None)
+        sex_col = next((c for c in df.columns if 'SEXE' in c.upper()), None)
+        if not age_col or not sex_col:
+            return {}
+
+        total = df['OBS_VALUE'].sum()
+        if total == 0:
+            return {}
+
+        # Répartition par tranche d'âge (tous sexes)
+        for age_code, age_label in AGE_LABELS.items():
+            pop_age = df[df[age_col] == age_code]['OBS_VALUE'].sum()
+            if pop_age > 0:
+                result[f'Part {age_label} (%)'] = round(pop_age / total * 100, 1)
+
+        # Répartition homme / femme
+        pop_h = df[df[sex_col] == '1']['OBS_VALUE'].sum()
+        pop_f = df[df[sex_col] == '2']['OBS_VALUE'].sum()
+        if pop_h + pop_f > 0:
+            result['Part des hommes (%)'] = round(pop_h / (pop_h + pop_f) * 100, 1)
+            result['Part des femmes (%)'] = round(pop_f / (pop_h + pop_f) * 100, 1)
+
+        # Indice de jeunesse : pop < 20 ans / pop >= 60 ans
+        young = df[df[age_col].isin(['00', '15'])]['OBS_VALUE'].sum()
+        old   = df[df[age_col].isin(['60', '75', '90'])]['OBS_VALUE'].sum()
+        if old > 0:
+            result['Indice de jeunesse'] = round(young / old, 2)
+
+    except Exception as e:
+        print(f"fetch_demographic_data error: {e}")
+
+    return result
+
+
 def _pdf_row(pdf, label, value, fill, col_w=190):
     """Affiche une ligne label/valeur dans le PDF."""
     GREY = (108, 117, 125)
@@ -671,8 +731,29 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
         if k in all_data:
             _pdf_row(pdf, k, all_data[k], i % 2 == 0)
 
-    # ── SECTION 2 : REVENUS & NIVEAU DE VIE ──────────────────────
-    _pdf_section(pdf, "2. Revenus et niveau de vie (FILOSOFI 2021)")
+    # ── SECTION 2 : COMPOSITION DÉMOGRAPHIQUE ────────────────────
+    demo_data = fetch_demographic_data(code, _kind)
+    _pdf_section(pdf, "2. Composition demographique (RP 2018)")
+    if demo_data:
+        # Ligne résumé hommes/femmes
+        if 'Part des hommes (%)' in demo_data and 'Part des femmes (%)' in demo_data:
+            _pdf_row(pdf, "Part des hommes (%)", demo_data['Part des hommes (%)'], True)
+            _pdf_row(pdf, "Part des femmes (%)", demo_data['Part des femmes (%)'], False)
+        if 'Indice de jeunesse' in demo_data:
+            _pdf_row(pdf, "Indice de jeunesse (pop<20ans / pop>=60ans)", demo_data['Indice de jeunesse'], True)
+        # Tranches d'âge
+        age_keys = ['Part 0-14 ans (%)', 'Part 15-29 ans (%)', 'Part 30-44 ans (%)',
+                    'Part 45-59 ans (%)', 'Part 60-74 ans (%)', 'Part 75-89 ans (%)', 'Part 90 ans et plus (%)']
+        for i, k in enumerate(age_keys):
+            if k in demo_data:
+                _pdf_row(pdf, k, demo_data[k], i % 2 == 0)
+    else:
+        pdf.set_text_color(108, 117, 125)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.cell(0, 6, "  Donnees non disponibles pour ce territoire.", ln=True)
+
+    # ── SECTION 3 : REVENUS & NIVEAU DE VIE ──────────────────────
+    _pdf_section(pdf, "3. Revenus et niveau de vie (FILOSOFI 2021)")
     revenus_keys = [
         "Niveau de vie median (EUR/an)",
         "Niveau de vie D1 - 10pct les plus modestes (EUR/an)",
@@ -696,8 +777,8 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
         pdf.set_font("Helvetica", "I", 8)
         pdf.cell(0, 6, "  Donnees non disponibles pour ce territoire.", ln=True)
 
-    # ── SECTION 3 : PAUVRETÉ ─────────────────────────────────────
-    _pdf_section(pdf, "3. Pauvrete et precarite (FILOSOFI 2021)")
+    # ── SECTION 4 : PAUVRETÉ ─────────────────────────────────────
+    _pdf_section(pdf, "4. Pauvrete et precarite (FILOSOFI 2021)")
     pauvrete_keys = [
         "Taux de pauvreté (%)",
         "Taux de pauvrete a 60pct (%)",
@@ -715,13 +796,13 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
         pdf.set_font("Helvetica", "I", 8)
         pdf.cell(0, 6, "  Donnees non disponibles pour ce territoire.", ln=True)
 
-    # ── SECTION 4 : TOUTES LES AUTRES DONNÉES ────────────────────
+    # ── SECTION 5 : TOUTES LES AUTRES DONNÉES ────────────────────
     already_shown = set(territoire_keys + revenus_keys + pauvrete_keys +
-                        ["URL Dossier INSEE", "Surface (ha)"])
+                        list(demo_data.keys()) + ["URL Dossier INSEE", "Surface (ha)"])
     remaining = {k: v for k, v in all_data.items()
                  if k not in already_shown and v is not None}
     if remaining:
-        _pdf_section(pdf, "4. Donnees complementaires")
+        _pdf_section(pdf, "5. Donnees complementaires")
         for i, (k, v) in enumerate(remaining.items()):
             _pdf_row(pdf, k, v, i % 2 == 0)
 
@@ -732,7 +813,7 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
                      not m['content'].startswith("Bonjour !")]
         if exchanges:
             pdf.add_page()
-            _pdf_section(pdf, "5. Analyse de l'assistant IA")
+            _pdf_section(pdf, "6. Analyse de l'assistant IA")
             pdf.set_font("Helvetica", "", 8)
             pdf.set_text_color(30, 30, 30)
             for content, role in exchanges:
