@@ -596,6 +596,25 @@ def fetch_demographic_data(code, kind):
     return result
 
 
+@st.cache_data
+def fetch_epci_communes(code):
+    """Récupère les communes d'un EPCI avec leur population, triées alphabétiquement."""
+    try:
+        r = requests.get(
+            f"https://geo.api.gouv.fr/epcis/{code}/communes?fields=nom,population",
+            timeout=15
+        )
+        if r.status_code == 200:
+            communes = r.json()
+            return sorted(
+                [{"nom": c.get("nom", ""), "population": c.get("population", 0)} for c in communes],
+                key=lambda x: x["nom"]
+            )
+    except Exception as e:
+        print(f"fetch_epci_communes error: {e}")
+    return []
+
+
 def generate_map_image(code, kind, title):
     """Génère une image PNG du territoire avec fond de carte IGN Plan V2."""
     import matplotlib
@@ -892,7 +911,44 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
         for i, (k, v) in enumerate(remaining.items()):
             _pdf_row(pdf, k, v, i % 2 == 0)
 
-    # ── SECTION 5 : ANALYSE IA (si disponible) ───────────────────
+    # ── SECTION EPCI : LISTE DES COMMUNES ────────────────────────
+    if _kind in ("intercommunalites", "EPCI"):
+        communes = fetch_epci_communes(code)
+        if communes:
+            _pdf_section(pdf, f"Communes de l'EPCI ({len(communes)} communes)")
+            # En-tête colonnes
+            y = pdf.get_y()
+            if y + 7 > pdf.h - pdf.b_margin:
+                pdf.add_page()
+                y = pdf.get_y()
+            pdf.set_fill_color(0, 51, 102)
+            pdf.set_draw_color(220, 220, 220)
+            pdf.rect(10, y, 190, 6, 'FD')
+            pdf.set_text_color(255, 255, 255)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_xy(12, y + 1)
+            pdf.cell(140, 4, "Commune", ln=False)
+            pdf.cell(48, 4, "Population", ln=False, align="R")
+            pdf.ln(6)
+            # Lignes
+            pop_total = sum(c["population"] or 0 for c in communes)
+            for i, commune in enumerate(communes):
+                _pdf_row(pdf, commune["nom"], commune.get("population") or "N/D", i % 2 == 0)
+            # Total
+            if pdf.get_y() + 8 > pdf.h - pdf.b_margin:
+                pdf.add_page()
+            y = pdf.get_y()
+            pdf.set_fill_color(230, 236, 245)
+            pdf.set_draw_color(0, 51, 102)
+            pdf.rect(10, y, 190, 7, 'FD')
+            pdf.set_text_color(0, 51, 102)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_xy(12, y + 1.5)
+            pdf.cell(140, 4, "TOTAL EPCI", ln=False)
+            pdf.cell(48, 4, f"{pop_total:,}".replace(",", " "), ln=False, align="R")
+            pdf.ln(7)
+
+    # ── SECTION ANALYSE IA (si disponible) ───────────────────────
     if ai_messages:
         exchanges = [(m['content'], m['role']) for m in ai_messages
                      if m['role'] in ('user', 'assistant') and
