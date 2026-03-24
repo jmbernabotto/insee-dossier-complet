@@ -12,3 +12,4 @@ google-generativeai
 python-dotenv
 fpdf2
 matplotlib
+contextily

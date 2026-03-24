@@ -581,7 +581,7 @@ def fetch_demographic_data(code, kind):
 
 
 def generate_map_image(code, kind, title):
-    """Génère une image PNG du contour du territoire pour intégration dans le PDF."""
+    """Génère une image PNG du territoire avec fond de carte IGN Plan V2."""
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -591,11 +591,30 @@ def generate_map_image(code, kind, title):
     if gdf is None:
         return None
     try:
-        fig, ax = plt.subplots(1, 1, figsize=(5, 3.5))
-        gdf.plot(ax=ax, color='#ccd9f0', edgecolor='#003366', linewidth=1.5)
+        # Reprojection en Web Mercator pour contextily
+        gdf_wm = gdf.to_crs(epsg=3857)
+
+        fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+        gdf_wm.plot(ax=ax, color='none', edgecolor='#003366', linewidth=2.5, zorder=2)
+
+        # Fond de carte IGN Plan V2 (même source que dans l'app)
+        try:
+            import contextily as cx
+            IGN_PLAN = (
+                "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile"
+                "&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2"
+                "&STYLE=normal&TILEMATRIXSET=PM"
+                "&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png"
+            )
+            cx.add_basemap(ax, source=IGN_PLAN, zoom="auto", attribution="")
+        except Exception as e:
+            print(f"Basemap IGN error (fallback sans fond): {e}")
+            gdf_wm.plot(ax=ax, color='#ccd9f0', edgecolor='#003366', linewidth=2, zorder=2)
+
         ax.set_axis_off()
         fig.patch.set_facecolor('white')
-        plt.tight_layout(pad=0.3)
+        plt.tight_layout(pad=0.2)
+
         buf = _io.BytesIO()
         fig.savefig(buf, format='png', dpi=150, bbox_inches='tight',
                     facecolor='white', edgecolor='none')
