@@ -448,6 +448,22 @@ def get_territory_indicators(code, kind):
     
     return indicators
 
+def strip_markdown(text):
+    """Supprime les balises markdown courantes pour un rendu texte brut."""
+    import re
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)   # **gras**
+    text = re.sub(r'\*(.+?)\*', r'\1', text)         # *italique*
+    text = re.sub(r'__(.+?)__', r'\1', text)         # __gras__
+    text = re.sub(r'_(.+?)_', r'\1', text)           # _italique_
+    text = re.sub(r'`{1,3}(.+?)`{1,3}', r'\1', text, flags=re.DOTALL)  # `code`
+    text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)  # # titres
+    text = re.sub(r'^\s*[-*+]\s+', '- ', text, flags=re.MULTILINE)  # listes
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)  # listes numérotées
+    text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)  # [liens](url)
+    text = re.sub(r'^\s*>{1,}\s*', '', text, flags=re.MULTILINE)  # > citations
+    return text.strip()
+
+
 def pdf_safe(text):
     """Remplace les caractères hors Latin-1 par des équivalents ASCII pour fpdf2/Helvetica."""
     replacements = {"€": "EUR", "—": "-", "–": "-", "…": "...", "\u2019": "'", "\u2018": "'",
@@ -893,7 +909,7 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
                 pdf.cell(0, 5, pdf_safe(prefix_label), ln=True)
                 pdf.set_font("Helvetica", "", 8)
                 pdf.set_x(14)
-                pdf.multi_cell(186, 5, pdf_safe(content))
+                pdf.multi_cell(186, 5, pdf_safe(strip_markdown(content)))
                 pdf.ln(2)
 
     # ── NOTE DE BAS DE RAPPORT ────────────────────────────────────
