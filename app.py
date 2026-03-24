@@ -630,10 +630,13 @@ def _pdf_row(pdf, label, value, fill, col_w=190):
     """Affiche une ligne label/valeur dans le PDF."""
     GREY = (108, 117, 125)
     BLACK = (30, 30, 30)
+    # Saut de page explicite si plus assez de place pour cette ligne
+    if pdf.get_y() + 7 > pdf.h - pdf.b_margin:
+        pdf.add_page()
+    y = pdf.get_y()
     bg = (245, 247, 250) if fill else (255, 255, 255)
     pdf.set_fill_color(*bg)
     pdf.set_draw_color(220, 220, 220)
-    y = pdf.get_y()
     pdf.rect(10, y, col_w, 7, 'FD')
     pdf.set_text_color(*GREY)
     pdf.set_font("Helvetica", "", 8)
@@ -658,7 +661,12 @@ def _pdf_row(pdf, label, value, fill, col_w=190):
 def _pdf_section(pdf, title):
     """Affiche un bandeau de titre de section."""
     BLUE = (0, 51, 102)
-    pdf.ln(3)
+    # Si moins de 25mm restants, passer à la page suivante
+    # pour éviter un titre de section isolé en bas de page
+    if pdf.get_y() + 25 > pdf.h - pdf.b_margin:
+        pdf.add_page()
+    else:
+        pdf.ln(3)
     pdf.set_fill_color(*BLUE)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Helvetica", "B", 10)
@@ -729,7 +737,7 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
     pdf.set_font("Helvetica", "I", 9)
     pdf.set_x(10)
     pdf.cell(0, 6, f"Rapport genere le {datetime.date.today().strftime('%d/%m/%Y')}", ln=True)
-    pdf.ln(30)
+    pdf.ln(6)
 
     # Lien dossier complet
     pdf.set_text_color(0, 51, 102)
@@ -770,9 +778,14 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
     # ── CARTE DU TERRITOIRE ───────────────────────────────────────
     map_img = generate_map_image(code, _kind, title)
     if map_img:
+        map_w = 100
+        map_h = 66  # ratio 3:2 pour une image figsize (6,4) à dpi 150
+        # Saut de page si la carte ne rentre pas
+        if pdf.get_y() + map_h + 8 > pdf.h - pdf.b_margin:
+            pdf.add_page()
         y_before = pdf.get_y()
-        pdf.image(map_img, x=55, y=y_before, w=100)
-        pdf.set_y(y_before + 68)
+        pdf.image(map_img, x=(210 - map_w) / 2, y=y_before, w=map_w)
+        pdf.set_y(y_before + map_h + 2)
         pdf.set_text_color(*GREY)
         pdf.set_font("Helvetica", "I", 7)
         pdf.cell(0, 4, pdf_safe(f"Carte du territoire : {title}"), ln=True, align="C")
