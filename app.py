@@ -580,6 +580,33 @@ def fetch_demographic_data(code, kind):
     return result
 
 
+def generate_map_image(code, kind, title):
+    """Génère une image PNG du contour du territoire pour intégration dans le PDF."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import io as _io
+
+    gdf = get_geo(code, kind, title)
+    if gdf is None:
+        return None
+    try:
+        fig, ax = plt.subplots(1, 1, figsize=(5, 3.5))
+        gdf.plot(ax=ax, color='#ccd9f0', edgecolor='#003366', linewidth=1.5)
+        ax.set_axis_off()
+        fig.patch.set_facecolor('white')
+        plt.tight_layout(pad=0.3)
+        buf = _io.BytesIO()
+        fig.savefig(buf, format='png', dpi=150, bbox_inches='tight',
+                    facecolor='white', edgecolor='none')
+        plt.close(fig)
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        print(f"generate_map_image error: {e}")
+        return None
+
+
 def _pdf_row(pdf, label, value, fill, col_w=190):
     """Affiche une ligne label/valeur dans le PDF."""
     GREY = (108, 117, 125)
@@ -720,6 +747,17 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
         pdf.set_xy(x + 2, y_band + 9)
         pdf.cell(col_w - 4, 8, display)
     pdf.ln(32)
+
+    # ── CARTE DU TERRITOIRE ───────────────────────────────────────
+    map_img = generate_map_image(code, _kind, title)
+    if map_img:
+        y_before = pdf.get_y()
+        pdf.image(map_img, x=55, y=y_before, w=100)
+        pdf.set_y(y_before + 68)
+        pdf.set_text_color(*GREY)
+        pdf.set_font("Helvetica", "I", 7)
+        pdf.cell(0, 4, pdf_safe(f"Carte du territoire : {title}"), ln=True, align="C")
+        pdf.ln(4)
 
     # ── SECTION 1 : TERRITOIRE ────────────────────────────────────
     _pdf_section(pdf, "1. Presentation du territoire")
