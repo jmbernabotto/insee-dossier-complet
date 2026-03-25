@@ -1260,13 +1260,8 @@ if data:
                 st.divider()
                 # Boutons utilitaires en bas
                 b1, b2, b3 = st.columns(3)
-                lat, lon, zoom = get_territory_centroid(row['CODE'], type_col)
-                carroye_url = (
-                    f"https://www.insee.fr/fr/outil-interactif/7737357/map.html#{zoom}/{lat}/{lon}"
-                    if lat and lon else
-                    "https://www.insee.fr/fr/outil-interactif/7737357/map.html"
-                )
-                with b1: st.link_button("🗺️ Outil Insee - Carte Carroyée", carroye_url, use_container_width=True)
+                with b1:
+                    st.link_button("🗺️ Outil Insee - Carte Carroyée", "https://www.insee.fr/fr/outil-interactif/7737357/map.html", use_container_width=True, help=f"Dans la barre de recherche de l'outil, tapez : {row['TITLE']}")
                 with b2: st.link_button("📊 Statistiques Locales Insee", "https://statistiques-locales.insee.fr/", use_container_width=True)
                 with b3:
                     if st.button("📥 Exporter le rapport (PDF)", use_container_width=True):
