@@ -814,13 +814,11 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
     map_img = generate_map_image(code, _kind, title)
     if map_img:
         map_w = 100
-        map_h = 66  # ratio 3:2 pour une image figsize (6,4) à dpi 150
-        # Saut de page si la carte ne rentre pas
-        if pdf.get_y() + map_h + 8 > pdf.h - pdf.b_margin:
+        # Saut de page si moins de 80mm restants
+        if pdf.get_y() + 80 > pdf.h - pdf.b_margin:
             pdf.add_page()
-        y_before = pdf.get_y()
-        pdf.image(map_img, x=(210 - map_w) / 2, y=y_before, w=map_w)
-        pdf.set_y(y_before + map_h + 2)
+        # Sans y= explicite : fpdf2 place l'image et avance le curseur automatiquement
+        pdf.image(map_img, x=(210 - map_w) / 2, w=map_w)
         pdf.set_text_color(*GREY)
         pdf.set_font("Helvetica", "I", 7)
         pdf.cell(0, 4, pdf_safe(f"Carte du territoire : {title}"), ln=True, align="C")
