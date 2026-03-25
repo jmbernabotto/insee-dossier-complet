@@ -464,6 +464,40 @@ def strip_markdown(text):
     return text.strip()
 
 
+@st.cache_data
+def get_territory_centroid(code, kind):
+    """Retourne (lat, lon, zoom) du centroïde du territoire via geo.api.gouv.fr."""
+    geo_map = {
+        "communes":          ("communes",    13),
+        "EPCI":              ("epcis",       11),
+        "intercommunalites": ("epcis",       11),
+        "departements":      ("departements", 9),
+        "regions":           ("regions",      8),
+    }
+    api_kind, zoom = geo_map.get(kind, ("communes", 12))
+    try:
+        r = requests.get(
+            f"https://geo.api.gouv.fr/{api_kind}/{code}?fields=centre",
+            timeout=10
+        )
+        if r.status_code == 200:
+            centre = r.json().get("centre", {})
+            if centre and "coordinates" in centre:
+                lon, lat = centre["coordinates"]
+                return round(lat, 5), round(lon, 5), zoom
+    except Exception:
+        pass
+    # Fallback : centroïde depuis le GeoDataFrame déjà chargé
+    try:
+        gdf = get_geo(code, kind, "")
+        if gdf is not None:
+            centroid = gdf.to_crs(epsg=4326).geometry.centroid.iloc[0]
+            return round(centroid.y, 5), round(centroid.x, 5), zoom
+    except Exception:
+        pass
+    return None, None, 12
+
+
 def pdf_safe(text):
     """Remplace les caractères hors Latin-1 par des équivalents ASCII pour fpdf2/Helvetica."""
     replacements = {"€": "EUR", "—": "-", "–": "-", "…": "...", "\u2019": "'", "\u2018": "'",
@@ -1226,7 +1260,13 @@ if data:
                 st.divider()
                 # Boutons utilitaires en bas
                 b1, b2, b3 = st.columns(3)
-                with b1: st.link_button("🗺️ Outil Insee - Carte Carroyée", "https://www.insee.fr/fr/outil-interactif/7737357/map.html", use_container_width=True)
+                lat, lon, zoom = get_territory_centroid(row['CODE'], type_col)
+                carroye_url = (
+                    f"https://www.insee.fr/fr/outil-interactif/7737357/map.html#{zoom}/{lat}/{lon}"
+                    if lat and lon else
+                    "https://www.insee.fr/fr/outil-interactif/7737357/map.html"
+                )
+                with b1: st.link_button("🗺️ Outil Insee - Carte Carroyée", carroye_url, use_container_width=True)
                 with b2: st.link_button("📊 Statistiques Locales Insee", "https://statistiques-locales.insee.fr/", use_container_width=True)
                 with b3:
                     if st.button("📥 Exporter le rapport (PDF)", use_container_width=True):
