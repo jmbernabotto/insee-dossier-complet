@@ -86,7 +86,7 @@ os.environ['insee_secret'] = '4fuwyvonN8U4N9XhyfIc3VRqybga'
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    # Utilisation du modèle Gemini 3 Flash
+    # Utilisation du modèle Gemini 3.5 Flash
     model = genai.GenerativeModel('gemini-3.5-flash')
 else:
     st.sidebar.error("Clé API Gemini manquante dans le fichier .env")
