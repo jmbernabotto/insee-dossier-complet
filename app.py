@@ -10,7 +10,6 @@ from streamlit_folium import st_folium
 import io
 import os
 import datetime
-import google.generativeai as genai
 from dotenv import load_dotenv
 import pynsee
 
@@ -78,23 +77,81 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Configuration Pynsee
-os.environ['insee_key'] = 'dKfEzOwfXe8_Az8K5ZA_pY4MfpYa'
-os.environ['insee_secret'] = '4fuwyvonN8U4N9XhyfIc3VRqybga'
+def get_secret(name, default=None):
+    """Lit une valeur dans les secrets Streamlit, sinon dans les variables d'environnement."""
+    try:
+        value = st.secrets.get(name)
+    except Exception:
+        value = None
+    if value is None:
+        value = os.getenv(name)
+    return value if value else default
 
-# Configuration Gemini
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
-    # Utilisation du modèle Gemini 3.5 Flash
-    model = genai.GenerativeModel('gemini-3.5-flash')
-else:
-    st.sidebar.error("Clé API Gemini manquante dans le fichier .env")
+# Configuration Pynsee (surchargeable via les secrets Streamlit / .env)
+os.environ['insee_key'] = get_secret("PYNSEE_KEY", 'dKfEzOwfXe8_Az8K5ZA_pY4MfpYa')
+os.environ['insee_secret'] = get_secret("PYNSEE_SECRET", '4fuwyvonN8U4N9XhyfIc3VRqybga')
 
-try:
-    INSEE_KEY = st.secrets.get("INSEE_API_KEY", "dfc20306-246c-477c-8203-06246c977cba")
-except Exception:
-    INSEE_KEY = "dfc20306-246c-477c-8203-06246c977cba"
+# Configuration OpenRouter
+OPENROUTER_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_KEY = get_secret("OPENROUTER_API_KEY")
+DEFAULT_MODEL = get_secret("OPENROUTER_MODEL", "google/gemini-2.5-flash")
+# Modèles proposés si le catalogue OpenRouter n'est pas joignable
+FALLBACK_MODELS = [
+    "google/gemini-2.5-flash",
+    "google/gemini-2.5-pro",
+    "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-haiku-4.5",
+    "openai/gpt-4.1-mini",
+    "openai/gpt-4o-mini",
+    "mistralai/mistral-medium-3.1",
+    "meta-llama/llama-3.3-70b-instruct",
+]
+
+# En-têtes optionnels de classement OpenRouter (identification de l'application)
+APP_URL = get_secret("OPENROUTER_SITE_URL", "https://streamlit.io")
+APP_TITLE = get_secret("OPENROUTER_APP_NAME", "Dossier INSEE Expert")
+
+INSEE_KEY = get_secret("INSEE_API_KEY", "dfc20306-246c-477c-8203-06246c977cba")
+
+SYSTEM_PROMPT = """Tu es un expert en démographie et géographie française, spécialisé dans l'analyse des données INSEE.
+
+Instructions :
+1. Utilise les données chiffrées fournies dans le message de l'utilisateur (Pauvreté, Niveau de vie, Population) en priorité absolue.
+2. Si la question porte sur une précision géographique très fine (quartier, rue, carreaux de 200m), mentionne que l'utilisateur peut consulter la "Carte interactive (Carroyage 200m)" via le bouton dédié pour visualiser les données à l'échelle infra-communale.
+3. Si tu n'as pas de réponse à la question (que ce soit via les données fournies ou tes connaissances générales), réponds exactement : "je ne peux répondre à votre question".
+4. Analyse les indicateurs de pauvreté et de niveau de vie pour donner un contexte social précis.
+5. Donne des réponses précises, analytiques et polies.
+"""
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def list_openrouter_models():
+    """Récupère le catalogue des modèles disponibles sur OpenRouter."""
+    try:
+        r = requests.get(f"{OPENROUTER_URL}/models", timeout=15)
+        if r.status_code != 200:
+            return []
+        models = []
+        for m in r.json().get("data", []):
+            mid = m.get("id")
+            if not mid:
+                continue
+            pricing = m.get("pricing", {}) or {}
+            try:
+                prompt_price = float(pricing.get("prompt", 0) or 0)
+                completion_price = float(pricing.get("completion", 0) or 0)
+            except (TypeError, ValueError):
+                # Tarif illisible : on ne le présente pas comme gratuit
+                prompt_price, completion_price = 1.0, 1.0
+            models.append({
+                "id": mid,
+                "name": m.get("name", mid),
+                "free": prompt_price == 0 and completion_price == 0,
+                "context": m.get("context_length") or 0,
+            })
+        return sorted(models, key=lambda x: x["id"])
+    except Exception:
+        return []
 
 @st.cache_data
 def load_insee(endpt):
@@ -1015,31 +1072,66 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
     return pdf.output()
 
 
-def ask_gemini(prompt, context_data, territory_name):
-    """Interroge Gemini avec le contexte du territoire."""
-    if not GEMINI_KEY:
-        return "Erreur : Clé API Gemini non configurée."
-    
+def ask_llm(prompt, context_data, territory_name):
+    """Interroge le LLM choisi via OpenRouter avec le contexte du territoire."""
+    if not OPENROUTER_KEY:
+        return ("Erreur : clé API OpenRouter non configurée. "
+                "Ajoutez `OPENROUTER_API_KEY` dans les secrets Streamlit "
+                "(ou dans votre fichier .env en local).")
+
     context_str = "\n".join([f"- {k}: {v}" for k, v in context_data.items()])
-    full_prompt = f"""Tu es un expert en démographie et géographie française, spécialisé dans l'analyse des données INSEE.
-Tu assistes un utilisateur qui consulte le dossier de la collectivité : {territory_name}.
+    full_prompt = f"""Tu assistes un utilisateur qui consulte le dossier de la collectivité : {territory_name}.
 
 Voici les données clés (issues des bases officielles INSEE / FILOSOFI) pour ce territoire :
 {context_str}
 
 L'utilisateur demande : {prompt}
-
-Instructions :
-1. Utilise les données chiffrées fournies ci-dessus (Pauvreté, Niveau de vie, Population) en priorité absolue.
-2. Si la question porte sur une précision géographique très fine (quartier, rue, carreaux de 200m), mentionne que l'utilisateur peut consulter la "Carte interactive (Carroyage 200m)" via le bouton dédié pour visualiser les données à l'échelle infra-communale.
-3. Si tu n'as pas de réponse à la question (que ce soit via les données fournies ou tes connaissances générales), réponds exactement : "je ne peux répondre à votre question".
-4. Analyse les indicateurs de pauvreté et de niveau de vie pour donner un contexte social précis.
-5. Donne des réponses précises, analytiques et polies.
 """
 
+    selected_model = st.session_state.get("llm_model", DEFAULT_MODEL)
+    temperature = st.session_state.get("llm_temperature", 0.3)
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": APP_URL,
+        "X-Title": APP_TITLE,
+    }
+    payload = {
+        "model": selected_model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": full_prompt},
+        ],
+        "temperature": temperature,
+    }
+
     try:
-        response = model.generate_content(full_prompt)
-        return response.text
+        r = requests.post(f"{OPENROUTER_URL}/chat/completions",
+                          headers=headers, json=payload, timeout=120)
+        if r.status_code != 200:
+            try:
+                detail = r.json().get("error", {}).get("message", r.text)
+            except Exception:
+                detail = r.text
+            return f"Erreur OpenRouter ({r.status_code}) avec le modèle `{selected_model}` : {detail}"
+
+        data = r.json()
+        if "error" in data and not data.get("choices"):
+            return f"Erreur OpenRouter : {data['error'].get('message', data['error'])}"
+
+        choices = data.get("choices") or []
+        if not choices:
+            return "Erreur : réponse vide renvoyée par OpenRouter."
+
+        message = choices[0].get("message", {}) or {}
+        content = (message.get("content") or "").strip()
+        # Certains modèles de raisonnement ne renvoient que le champ `reasoning`
+        if not content:
+            content = (message.get("reasoning") or "").strip()
+        return content or "Erreur : réponse vide renvoyée par le modèle."
+    except requests.exceptions.Timeout:
+        return "Erreur : délai d'attente dépassé lors de l'appel au modèle."
     except Exception as e:
         return f"Erreur lors de la génération : {e}"
 
@@ -1055,6 +1147,53 @@ type_mapping = {
     "Arrondissements Municipaux (Paris, Lyon, Marseille)": "arrondissementsMunicipaux",
     "Communes Associées / Déléguées": "communesDeleguees"
 }
+
+# --- SÉLECTION DU MODÈLE (OpenRouter) ---
+with st.sidebar.expander("🤖 Modèle IA (OpenRouter)", expanded=not OPENROUTER_KEY):
+    if not OPENROUTER_KEY:
+        st.error("Clé `OPENROUTER_API_KEY` manquante dans les secrets Streamlit (ou le fichier .env).")
+
+    catalog = list_openrouter_models()
+    if catalog:
+        only_free = st.checkbox("Uniquement les modèles gratuits", value=False)
+        pool = [m for m in catalog if m["free"]] if only_free else catalog
+        filter_txt = st.text_input("Filtrer", placeholder="ex : claude, gemini, mistral…").strip().lower()
+        if filter_txt:
+            pool = [m for m in pool if filter_txt in m["id"].lower() or filter_txt in m["name"].lower()]
+        options = [m["id"] for m in pool]
+        labels = {m["id"]: f"{m['name']}{' · gratuit' if m['free'] else ''}" for m in pool}
+    else:
+        st.caption("Catalogue OpenRouter indisponible : liste de secours utilisée.")
+        options = list(FALLBACK_MODELS)
+        labels = {m: m for m in options}
+
+    current = st.session_state.get("llm_model", DEFAULT_MODEL)
+    if current not in options:
+        if DEFAULT_MODEL in options:
+            current = DEFAULT_MODEL
+        elif options:
+            current = options[0]
+
+    if options:
+        selected = st.selectbox(
+            "Modèle",
+            options,
+            index=options.index(current) if current in options else 0,
+            format_func=lambda m: labels.get(m, m),
+        )
+    else:
+        st.warning("Aucun modèle ne correspond au filtre.")
+        selected = st.session_state.get("llm_model", DEFAULT_MODEL)
+
+    custom = st.text_input(
+        "Ou identifiant personnalisé",
+        placeholder="ex : anthropic/claude-sonnet-4.5",
+        help="Prioritaire sur la liste ci-dessus. Format OpenRouter : fournisseur/modèle.",
+    ).strip()
+
+    st.session_state["llm_model"] = custom or selected
+    st.slider("Température", 0.0, 1.0, 0.3, 0.1, key="llm_temperature")
+    st.caption(f"Modèle actif : `{st.session_state['llm_model']}`")
 
 label_type = st.sidebar.selectbox("Type", list(type_mapping.keys()))
 type_col = type_mapping[label_type]
@@ -1253,7 +1392,7 @@ if data:
                                     st.markdown(prompt)
                                 with st.chat_message("assistant"):
                                     with st.spinner("Analyse en cours..."):
-                                        response = ask_gemini(prompt, indicators, row['TITLE'])
+                                        response = ask_llm(prompt, indicators, row['TITLE'])
                                         st.markdown(response)
                             st.session_state.messages.append({"role": "assistant", "content": response})
 

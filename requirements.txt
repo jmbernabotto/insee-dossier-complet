@@ -8,7 +8,6 @@ streamlit-folium
 geopandas
 shapely
 numpy
-google-generativeai
 python-dotenv
 fpdf2
 matplotlib
