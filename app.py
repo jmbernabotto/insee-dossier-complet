@@ -97,14 +97,14 @@ OPENROUTER_KEY = get_secret("OPENROUTER_API_KEY")
 DEFAULT_MODEL = get_secret("OPENROUTER_MODEL", "google/gemini-2.5-flash")
 # Modèles proposés si le catalogue OpenRouter n'est pas joignable
 FALLBACK_MODELS = [
-    "google/gemini-2.5-flash",
-    "google/gemini-2.5-pro",
-    "anthropic/claude-sonnet-4.5",
+    "google/gemini-3.7-flash",
+    "google/gemini-3.1-pro-preview",
+    "anthropic/claude-sonnet-5",
     "anthropic/claude-haiku-4.5",
-    "openai/gpt-4.1-mini",
-    "openai/gpt-4o-mini",
+    "openai/gpt-5.6-luna",
+    "openai/gpt-5.6-terra",
     "mistralai/mistral-medium-3.1",
-    "meta-llama/llama-3.3-70b-instruct",
+    "qwen/qwen3.8-flash",
 ]
 
 # En-têtes optionnels de classement OpenRouter (identification de l'application)
