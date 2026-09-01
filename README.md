@@ -31,3 +31,14 @@ Dans la barre latérale, l'expander **🤖 Modèle IA (OpenRouter)** permet de :
 - régler la température.
 
 Si le catalogue n'est pas joignable, une liste de secours est proposée.
+
+### Fiabilité des réponses
+
+- Les réponses sont **streamées** (`stream: true`) : la connexion vers le fournisseur ne reste
+  jamais silencieuse, ce qui évite les abandons amont (`The operation was aborted`) sur les
+  réponses longues. Une relance automatique est tentée tant qu'aucun texte n'a été affiché.
+- La longueur est bornée (`MAX_TOKENS`) et les erreurs HTTP (401, 402, 429…) sont traduites
+  en messages actionnables.
+- Le contexte envoyé au modèle inclut la **répartition de la population par âge et par sexe**
+  issue du recensement (API Melodi de l'INSEE). Si cette donnée n'est pas disponible pour le
+  territoire, le modèle est explicitement instruit de le dire plutôt que de l'estimer.

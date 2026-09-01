@@ -87,14 +87,20 @@ def get_secret(name, default=None):
         value = os.getenv(name)
     return value if value else default
 
-# Configuration Pynsee ( via les secrets Streamlit / .env)
-os.environ['insee_key'] = get_secret("PYNSEE_KEY")
-os.environ['insee_secret'] = get_secret("PYNSEE_SECRET")
+# Configuration Pynsee (via les secrets Streamlit / .env)
+# On ne renseigne la variable que si le secret existe : affecter None à
+# os.environ lève un TypeError et empêcherait l'application de démarrer.
+for _env_var, _secret_name in (("insee_key", "PYNSEE_KEY"), ("insee_secret", "PYNSEE_SECRET")):
+    _value = get_secret(_secret_name)
+    if _value:
+        os.environ[_env_var] = _value
 
 # Configuration OpenRouter
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_KEY = get_secret("OPENROUTER_API_KEY")
 DEFAULT_MODEL = get_secret("OPENROUTER_MODEL", "google/gemini-3.7-flash")
+MAX_TOKENS = 1500          # borne la longueur d'une réponse
+STREAM_TIMEOUT = (10, 180)  # (connexion, lecture entre deux chunks)
 # Modèles proposés si le catalogue OpenRouter n'est pas joignable
 FALLBACK_MODELS = [
     "google/gemini-3.7-flash",
@@ -121,6 +127,11 @@ Instructions :
 3. Si tu n'as pas de réponse à la question (que ce soit via les données fournies ou tes connaissances générales), réponds exactement : "je ne peux répondre à votre question".
 4. Analyse les indicateurs de pauvreté et de niveau de vie pour donner un contexte social précis.
 5. Donne des réponses précises, analytiques et polies.
+6. N'invente jamais de chiffre : n'utilise que les valeurs présentes dans le message de l'utilisateur.
+   Si une donnée demandée (répartition par âge ou par sexe, catégories socioprofessionnelles,
+   logement, emploi…) n'y figure pas, dis-le explicitement et renvoie vers le dossier complet
+   de l'INSEE plutôt que de produire une estimation.
+7. Sois synthétique : va droit au chiffre demandé et à son interprétation.
 """
 
 
@@ -504,6 +515,191 @@ def get_territory_indicators(code, kind):
             indicators[k] = v
     
     return indicators
+
+# --- STRUCTURE DE LA POPULATION PAR ÂGE ET PAR SEXE (recensement, API Melodi) ---
+
+# Jeux de données Melodi essayés dans l'ordre pour la structure démographique
+RP_DATASETS = ["DS_RP_POPULATION_PRINC", "DS_RP_POPULATION_COMP"]
+
+# Dimensions de contexte : on ne garde que leur modalité « Ensemble » (_T)
+_RP_STRUCTURAL_DIMS = {"GEO", "TIME_PERIOD", "FREQ", "UNIT_MULT", "OBS_STATUS", "DECIMALS"}
+
+
+def _age_label(code):
+    """Traduit un code d'âge SDMX (Y_LT15, Y15T29, Y_GE75…) en libellé lisible.
+
+    Renvoie (libellé, borne_inférieure) ; la borne sert à trier les tranches.
+    """
+    import re
+    c = str(code).upper()
+    m = re.match(r"^Y_LT(\d+)$", c)
+    if m:
+        return f"Moins de {m.group(1)} ans", 0
+    m = re.match(r"^Y(\d+)T(\d+)$", c)
+    if m:
+        return f"{m.group(1)} à {m.group(2)} ans", int(m.group(1))
+    m = re.match(r"^Y_GE(\d+)$", c)
+    if m:
+        return f"{m.group(1)} ans ou plus", int(m.group(1))
+    m = re.match(r"^Y(\d+)$", c)
+    if m:
+        return f"{m.group(1)} ans", int(m.group(1))
+    return c, 9999
+
+
+def _sex_slot(code):
+    """Associe un code de sexe SDMX à 'H', 'F' ou 'T' (ensemble). None si inconnu."""
+    c = str(code).upper().lstrip("_")
+    if c in ("M", "MALE", "1"):
+        return "H"
+    if c in ("F", "FEMALE", "2"):
+        return "F"
+    if c in ("T", "TOTAL", ""):
+        return "T"
+    return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_age_sex_structure(code, kind):
+    """Récupère la répartition de la population par tranche d'âge et par sexe.
+
+    Source : recensement de la population via l'API Melodi de l'INSEE.
+    Le parsing reste volontairement générique (nomenclature SDMX) afin de rester
+    valide si l'INSEE fait évoluer les codes de dimensions.
+    Renvoie {} si la donnée n'est pas disponible — l'assistant indiquera alors
+    qu'il ne dispose pas de cette information plutôt que de l'estimer.
+    """
+    prefix_map = {
+        "communes": "COM",
+        "EPCI": "EPCI",
+        "intercommunalites": "EPCI",
+        "departements": "DEP",
+        "regions": "REG",
+    }
+    prefix = prefix_map.get(kind)
+    if not prefix:
+        return {}
+
+    h = {"Authorization": f"Bearer {INSEE_KEY}", "Accept": "application/json"}
+
+    for dataset in RP_DATASETS:
+        try:
+            r = requests.get(
+                f"https://api.insee.fr/melodi/data/{dataset}?GEO={prefix}-{code}",
+                headers=h, timeout=15,
+            )
+            if r.status_code != 200:
+                print(f"DEBUG: Melodi {dataset} -> {r.status_code} pour {prefix}-{code}")
+                continue
+
+            observations = r.json().get("observations", [])
+            if not observations:
+                continue
+
+            # Millésime le plus récent disponible
+            periods = {str(o.get("dimensions", {}).get("TIME_PERIOD", ""))
+                       for o in observations}
+            periods.discard("")
+            latest = max(periods) if periods else None
+
+            rows = {}   # code d'âge -> {"H": n, "F": n, "T": n}
+            totals = {}
+            for obs in observations:
+                dims = obs.get("dimensions", {}) or {}
+                if latest and str(dims.get("TIME_PERIOD", latest)) != latest:
+                    continue
+
+                sex = _sex_slot(dims.get("SEX"))
+                age = dims.get("AGE")
+                if sex is None or age is None:
+                    continue
+
+                # On écarte les croisements (diplôme, CSP, activité…) en ne gardant
+                # que la modalité « Ensemble » des autres dimensions.
+                crossed = False
+                for dim, val in dims.items():
+                    if dim in _RP_STRUCTURAL_DIMS or dim in ("SEX", "AGE"):
+                        continue
+                    if "MEASURE" in dim:
+                        continue
+                    if str(val).upper().lstrip("_") not in ("T", "TOTAL"):
+                        crossed = True
+                        break
+                if crossed:
+                    continue
+
+                measures = obs.get("measures", {}) or {}
+                value = None
+                for key, payload in measures.items():
+                    if "OBS_VALUE" not in key.upper():
+                        continue
+                    candidate = payload.get("value") if isinstance(payload, dict) else payload
+                    if candidate is not None and not pd.isna(candidate):
+                        value = candidate
+                        break
+                if value is None:
+                    continue
+
+                target = totals if str(age).upper().lstrip("_") in ("T", "TOTAL") else \
+                    rows.setdefault(age, {})
+                target[sex] = int(round(float(value)))
+
+            tranches = []
+            for age_code, values in rows.items():
+                label, lower = _age_label(age_code)
+                total = values.get("T")
+                if total is None and ("H" in values or "F" in values):
+                    total = values.get("H", 0) + values.get("F", 0)
+                tranches.append({
+                    "label": label, "ordre": lower,
+                    "H": values.get("H"), "F": values.get("F"), "T": total,
+                })
+            tranches.sort(key=lambda t: t["ordre"])
+
+            if not tranches:
+                continue
+
+            if not totals:
+                totals = {
+                    slot: sum(t[slot] for t in tranches if t[slot] is not None)
+                    for slot in ("H", "F", "T")
+                }
+
+            return {"annee": latest, "dataset": dataset,
+                    "tranches": tranches, "total": totals}
+        except Exception as e:
+            print(f"Erreur Melodi {dataset} pour {code} : {e}")
+
+    return {}
+
+
+def format_age_sex_context(structure):
+    """Met la structure démographique en tableau markdown pour le contexte du LLM."""
+    if not structure or not structure.get("tranches"):
+        return ""
+
+    total_general = structure.get("total", {}).get("T") or 0
+
+    def cell(value):
+        if value is None:
+            return "n.d."
+        if total_general:
+            return f"{value:,}".replace(",", " ") + f" ({value / total_general * 100:.1f} %)"
+        return f"{value:,}".replace(",", " ")
+
+    lignes = ["| Tranche d'âge | Hommes | Femmes | Ensemble |",
+              "|---|---|---|---|"]
+    for t in structure["tranches"]:
+        lignes.append(f"| {t['label']} | {cell(t['H'])} | {cell(t['F'])} | {cell(t['T'])} |")
+
+    tot = structure.get("total", {})
+    lignes.append(f"| **Ensemble** | {cell(tot.get('H'))} | {cell(tot.get('F'))} "
+                  f"| {cell(tot.get('T'))} |")
+
+    annee = f" ({structure['annee']})" if structure.get("annee") else ""
+    return (f"Répartition de la population par âge et par sexe — "
+            f"recensement INSEE{annee} :\n" + "\n".join(lignes))
+
 
 def strip_markdown(text):
     """Supprime les balises markdown courantes pour un rendu texte brut."""
@@ -1072,25 +1268,32 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
     return pdf.output()
 
 
-def ask_llm(prompt, context_data, territory_name):
-    """Interroge le LLM choisi via OpenRouter avec le contexte du territoire."""
-    if not OPENROUTER_KEY:
-        return ("Erreur : clé API OpenRouter non configurée. "
-                "Ajoutez `OPENROUTER_API_KEY` dans les secrets Streamlit "
-                "(ou dans votre fichier .env en local).")
-
+def build_llm_messages(prompt, context_data, territory_name, demographics=None):
+    """Assemble les messages envoyés au modèle (système + contexte territorial)."""
     context_str = "\n".join([f"- {k}: {v}" for k, v in context_data.items()])
-    full_prompt = f"""Tu assistes un utilisateur qui consulte le dossier de la collectivité : {territory_name}.
+    demo_block = format_age_sex_context(demographics) if demographics else ""
+
+    user_content = f"""Tu assistes un utilisateur qui consulte le dossier de la collectivité : {territory_name}.
 
 Voici les données clés (issues des bases officielles INSEE / FILOSOFI) pour ce territoire :
 {context_str}
-
-L'utilisateur demande : {prompt}
 """
+    if demo_block:
+        user_content += f"\n{demo_block}\n"
+    else:
+        user_content += ("\nAucune donnée de répartition par âge ou par sexe n'est disponible "
+                         "pour ce territoire : ne l'estime pas, indique-le à l'utilisateur.\n")
 
-    selected_model = st.session_state.get("llm_model", DEFAULT_MODEL)
-    temperature = st.session_state.get("llm_temperature", 0.3)
+    user_content += f"\nL'utilisateur demande : {prompt}\n"
 
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def _openrouter_request(messages, stream):
+    """Envoie la requête à OpenRouter. Renvoie l'objet réponse `requests`."""
     headers = {
         "Authorization": f"Bearer {OPENROUTER_KEY}",
         "Content-Type": "application/json",
@@ -1098,27 +1301,136 @@ L'utilisateur demande : {prompt}
         "X-Title": APP_TITLE,
     }
     payload = {
-        "model": selected_model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": full_prompt},
-        ],
-        "temperature": temperature,
+        "model": st.session_state.get("llm_model", DEFAULT_MODEL),
+        "messages": messages,
+        "temperature": st.session_state.get("llm_temperature", 0.3),
+        "max_tokens": MAX_TOKENS,
+        "stream": stream,
     }
+    return requests.post(f"{OPENROUTER_URL}/chat/completions", headers=headers,
+                         json=payload, stream=stream,
+                         timeout=STREAM_TIMEOUT if stream else 120)
 
+
+def _http_error_message(response):
+    """Formate une erreur HTTP OpenRouter de façon lisible."""
+    model = st.session_state.get("llm_model", DEFAULT_MODEL)
     try:
-        r = requests.post(f"{OPENROUTER_URL}/chat/completions",
-                          headers=headers, json=payload, timeout=120)
+        detail = response.json().get("error", {}).get("message", response.text)
+    except Exception:
+        detail = response.text
+    if response.status_code == 401:
+        detail += " — vérifiez `OPENROUTER_API_KEY` dans les secrets Streamlit."
+    elif response.status_code == 402:
+        detail += " — crédits OpenRouter insuffisants pour ce modèle."
+    elif response.status_code == 429:
+        detail += " — quota atteint, réessayez ou changez de modèle dans la barre latérale."
+    return f"Erreur OpenRouter ({response.status_code}) avec le modèle `{model}` : {detail}"
+
+
+def _iter_stream_chunks(response):
+    """Parcourt le flux SSE d'OpenRouter et rend les fragments de texte.
+
+    Lève RuntimeError si le flux transporte une erreur (ex. abandon amont).
+    """
+    for raw in response.iter_lines(decode_unicode=True):
+        if not raw:
+            continue
+        # OpenRouter envoie des commentaires SSE (« : OPENROUTER PROCESSING ») en
+        # attendant le fournisseur : ils maintiennent la connexion active.
+        if raw.startswith(":"):
+            continue
+        if not raw.startswith("data:"):
+            continue
+        data = raw[len("data:"):].strip()
+        if data == "[DONE]":
+            return
+        try:
+            event = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+
+        if event.get("error"):
+            err = event["error"]
+            raise RuntimeError(err.get("message", err) if isinstance(err, dict) else err)
+
+        for choice in event.get("choices", []) or []:
+            delta = choice.get("delta", {}) or {}
+            piece = delta.get("content") or ""
+            if piece:
+                yield piece
+
+
+def stream_llm(prompt, context_data, territory_name, demographics=None):
+    """Interroge le LLM via OpenRouter en streaming et rend la réponse au fil de l'eau.
+
+    Le streaming évite les abandons du fournisseur amont sur les réponses longues :
+    la connexion ne reste jamais silencieuse. Une relance automatique est tentée
+    tant qu'aucun texte n'a encore été affiché (sinon la réponse serait dupliquée).
+    """
+    if not OPENROUTER_KEY:
+        yield ("Erreur : clé API OpenRouter non configurée. "
+               "Ajoutez `OPENROUTER_API_KEY` dans les secrets Streamlit "
+               "(ou dans votre fichier .env en local).")
+        return
+
+    messages = build_llm_messages(prompt, context_data, territory_name, demographics)
+    model = st.session_state.get("llm_model", DEFAULT_MODEL)
+
+    for attempt in range(2):
+        emitted = False
+        try:
+            response = _openrouter_request(messages, stream=True)
+            if response.status_code != 200:
+                # 429 et 5xx sont transitoires : une seconde tentative peut aboutir
+                if response.status_code in (429, 500, 502, 503, 504) and attempt == 0:
+                    continue
+                yield _http_error_message(response)
+                return
+
+            for piece in _iter_stream_chunks(response):
+                emitted = True
+                yield piece
+
+            if emitted:
+                return
+            # Flux vide : on retente une fois, puis on le signale
+            if attempt == 0:
+                continue
+            yield "Erreur : réponse vide renvoyée par le modèle."
+            return
+
+        except (RuntimeError, requests.exceptions.RequestException) as e:
+            if not emitted and attempt == 0:
+                continue  # rien n'a été affiché : relance sans risque de doublon
+            if emitted:
+                yield ("\n\n_(réponse interrompue par le fournisseur : "
+                       f"{e} — relancez la question ou choisissez un autre modèle.)_")
+            else:
+                yield (f"Erreur OpenRouter avec le modèle `{model}` : {e}\n\n"
+                       "Ce modèle a interrompu la génération. Réessayez ou "
+                       "sélectionnez un autre modèle dans la barre latérale.")
+            return
+
+
+def ask_llm(prompt, context_data, territory_name, demographics=None):
+    """Version non streamée (repli) : renvoie la réponse complète en une fois."""
+    if not OPENROUTER_KEY:
+        return ("Erreur : clé API OpenRouter non configurée. "
+                "Ajoutez `OPENROUTER_API_KEY` dans les secrets Streamlit "
+                "(ou dans votre fichier .env en local).")
+
+    messages = build_llm_messages(prompt, context_data, territory_name, demographics)
+    try:
+        r = _openrouter_request(messages, stream=False)
         if r.status_code != 200:
-            try:
-                detail = r.json().get("error", {}).get("message", r.text)
-            except Exception:
-                detail = r.text
-            return f"Erreur OpenRouter ({r.status_code}) avec le modèle `{selected_model}` : {detail}"
+            return _http_error_message(r)
 
         data = r.json()
-        if "error" in data and not data.get("choices"):
-            return f"Erreur OpenRouter : {data['error'].get('message', data['error'])}"
+        if data.get("error") and not data.get("choices"):
+            err = data["error"]
+            message = err.get("message", err) if isinstance(err, dict) else err
+            return f"Erreur OpenRouter : {message}"
 
         choices = data.get("choices") or []
         if not choices:
@@ -1391,9 +1703,12 @@ if data:
                                 with st.chat_message("user"):
                                     st.markdown(prompt)
                                 with st.chat_message("assistant"):
-                                    with st.spinner("Analyse en cours..."):
-                                        response = ask_llm(prompt, indicators, row['TITLE'])
-                                        st.markdown(response)
+                                    with st.spinner("Récupération des données INSEE..."):
+                                        demographics = get_age_sex_structure(row['CODE'], type_col)
+                                    # Streaming : la réponse s'affiche au fil de l'eau
+                                    response = st.write_stream(
+                                        stream_llm(prompt, indicators, row['TITLE'], demographics)
+                                    )
                             st.session_state.messages.append({"role": "assistant", "content": response})
 
                 st.divider()
