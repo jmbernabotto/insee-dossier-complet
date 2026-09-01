@@ -15,7 +15,7 @@ ou `.streamlit/secrets.toml` en local — voir `.streamlit/secrets.toml.example`
 
 ```toml
 OPENROUTER_API_KEY = "sk-or-v1-..."
-OPENROUTER_MODEL   = "google/gemini-2.5-flash"  # optionnel : modèle par défaut
+OPENROUTER_MODEL   = "google/gemini-3.7-flash"  # optionnel : modèle par défaut
 ```
 
 Les variables d'environnement (fichier `.env`) sont acceptées en repli si aucun secret
