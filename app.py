@@ -1333,6 +1333,12 @@ def _iter_stream_chunks(response):
 
     Lève RuntimeError si le flux transporte une erreur (ex. abandon amont).
     """
+    # OpenRouter renvoie « text/event-stream » sans charset : requests applique
+    # alors le défaut HTTP/1.1 des types text/* (ISO-8859-1) et les accents
+    # ressortent en mojibake (« RÃ©partition »). Les flux SSE et le JSON qu'ils
+    # transportent sont toujours en UTF-8 : on force donc le décodage.
+    response.encoding = "utf-8"
+
     for raw in response.iter_lines(decode_unicode=True):
         if not raw:
             continue
