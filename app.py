@@ -87,9 +87,9 @@ def get_secret(name, default=None):
         value = os.getenv(name)
     return value if value else default
 
-# Configuration Pynsee (surchargeable via les secrets Streamlit / .env)
-os.environ['insee_key'] = get_secret("PYNSEE_KEY", 'dKfEzOwfXe8_Az8K5ZA_pY4MfpYa')
-os.environ['insee_secret'] = get_secret("PYNSEE_SECRET", '4fuwyvonN8U4N9XhyfIc3VRqybga')
+# Configuration Pynsee ( via les secrets Streamlit / .env)
+os.environ['insee_key'] = get_secret("PYNSEE_KEY")
+os.environ['insee_secret'] = get_secret("PYNSEE_SECRET")
 
 # Configuration OpenRouter
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
