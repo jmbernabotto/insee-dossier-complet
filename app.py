@@ -94,7 +94,7 @@ os.environ['insee_secret'] = get_secret("PYNSEE_SECRET", '4fuwyvonN8U4N9XhyfIc3V
 # Configuration OpenRouter
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_KEY = get_secret("OPENROUTER_API_KEY")
-DEFAULT_MODEL = get_secret("OPENROUTER_MODEL", "google/gemini-2.5-flash")
+DEFAULT_MODEL = get_secret("OPENROUTER_MODEL", "google/gemini-3.7-flash")
 # Modèles proposés si le catalogue OpenRouter n'est pas joignable
 FALLBACK_MODELS = [
     "google/gemini-3.7-flash",
