@@ -119,7 +119,6 @@ FALLBACK_MODELS = [
 APP_URL = get_secret("OPENROUTER_SITE_URL", "https://streamlit.io")
 APP_TITLE = get_secret("OPENROUTER_APP_NAME", "Dossier INSEE Expert")
 
-INSEE_KEY = get_secret("INSEE_API_KEY", "dfc20306-246c-477c-8203-06246c977cba")
 
 SYSTEM_PROMPT = """Tu es un expert en démographie et géographie française, spécialisé dans l'analyse des données INSEE.
 
