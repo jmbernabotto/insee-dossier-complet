@@ -97,6 +97,41 @@ class StaticContractsTest(unittest.TestCase):
         self.assertEqual(value.keywords, [])
         self.assertNotIn("dfc20306-246c-477c-8203-06246c977cba", self.source)
 
+    def test_chat_uses_enriched_insee_context(self):
+        build_context = self._function_def("build_ai_context")
+        called_functions = {
+            node.func.id
+            for node in ast.walk(build_context)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+
+        self.assertIn("fetch_pdf_data", called_functions)
+        self.assertIn("fetch_demographic_data", called_functions)
+
+        stream_calls = [
+            node
+            for node in ast.walk(self.tree)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "stream_llm"
+            )
+        ]
+        self.assertTrue(
+            any(
+                len(call.args) >= 2
+                and isinstance(call.args[1], ast.Name)
+                and call.args[1].id == "ai_context"
+                for call in stream_calls
+            )
+        )
+
+    def _function_def(self, name):
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return node
+        self.fail(f"Function {name} not found")
+
     def _displayed_indicators(self):
         indicators = []
         for node in ast.walk(self.tree):

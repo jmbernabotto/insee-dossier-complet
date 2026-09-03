@@ -124,15 +124,15 @@ INSEE_KEY = get_secret("INSEE_API_KEY")
 SYSTEM_PROMPT = """Tu es un expert en démographie et géographie française, spécialisé dans l'analyse des données INSEE.
 
 Instructions :
-1. Utilise les données chiffrées fournies dans le message de l'utilisateur (Pauvreté, Niveau de vie, Population) en priorité absolue.
+1. Utilise toutes les données chiffrées fournies dans le message de l'utilisateur en priorité absolue.
 2. Si la question porte sur une précision géographique très fine (quartier, rue, carreaux de 200m), mentionne que l'utilisateur peut consulter la "Carte interactive (Carroyage 200m)" via le bouton dédié pour visualiser les données à l'échelle infra-communale.
-3. Si tu n'as pas de réponse à la question (que ce soit via les données fournies ou tes connaissances générales), réponds exactement : "je ne peux répondre à votre question".
+3. Avant de répondre que la donnée manque, vérifie toutes les rubriques fournies : population, territoire, revenus, pauvreté, démographie, âge et sexe.
 4. Analyse les indicateurs de pauvreté et de niveau de vie pour donner un contexte social précis.
 5. Donne des réponses précises, analytiques et polies.
 6. N'invente jamais de chiffre : n'utilise que les valeurs présentes dans le message de l'utilisateur.
    Si une donnée demandée (répartition par âge ou par sexe, catégories socioprofessionnelles,
-   logement, emploi…) n'y figure pas, dis-le explicitement et renvoie vers le dossier complet
-   de l'INSEE plutôt que de produire une estimation.
+   logement, emploi…) n'y figure pas, dis-le explicitement. Ne renvoie vers le dossier complet
+   de l'INSEE qu'en dernier recours, après avoir indiqué quelles données disponibles s'en rapprochent.
 7. Sois synthétique : va droit au chiffre demandé et à son interprétation.
 """
 
@@ -770,7 +770,7 @@ def fetch_pdf_data(code, kind, insee_key):
                   "departements": "DEP", "regions": "REG"}
     prefix = prefix_map.get(kind)
 
-    if prefix:
+    if prefix and insee_key:
         measure_map = {
             'MED_SL':         'Niveau de vie median (EUR/an)',
             'D1_SL':          'Niveau de vie D1 - 10pct les plus modestes (EUR/an)',
@@ -883,6 +883,37 @@ def fetch_demographic_data(code, kind):
         print(f"fetch_demographic_data error: {e}")
 
     return result
+
+
+def _has_context_value(value):
+    """Vérifie qu'une valeur peut être transmise au contexte IA."""
+    if value is None:
+        return False
+    try:
+        return not pd.isna(value)
+    except (TypeError, ValueError):
+        return True
+
+
+def build_ai_context(code, kind, indicators):
+    """Réunit les indicateurs visibles et les données INSEE étendues pour le chat IA."""
+    context = {
+        key: value
+        for key, value in (indicators or {}).items()
+        if _has_context_value(value)
+    }
+
+    extended = fetch_pdf_data(code, kind, INSEE_KEY)
+    for key, value in extended.items():
+        if _has_context_value(value) and key not in context:
+            context[key] = value
+
+    demographic_summary = fetch_demographic_data(code, kind)
+    for key, value in demographic_summary.items():
+        if _has_context_value(value):
+            context[f"Démographie - {key}"] = value
+
+    return context
 
 
 @st.cache_data
@@ -1757,10 +1788,11 @@ if data:
                                 with st.chat_message("assistant"):
                                     with st.spinner("Récupération des données INSEE..."):
                                         demographics = get_age_sex_structure(row['CODE'], type_col)
+                                        ai_context = build_ai_context(row['CODE'], type_col, indicators)
                                     # Streaming : la réponse s'affiche au fil de l'eau
                                     response = st.write_stream(
                                         stream_llm(
-                                            prompt, indicators, row['TITLE'], demographics,
+                                            prompt, ai_context, row['TITLE'], demographics,
                                             history=history
                                         )
                                     )
