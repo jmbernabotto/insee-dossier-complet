@@ -75,6 +75,28 @@ class StaticContractsTest(unittest.TestCase):
         self.assertIn(".DS_Store", gitignore)
         self.assertIn("__pycache__/", gitignore)
 
+    def test_insee_key_comes_from_secret_without_default(self):
+        assignments = []
+        for node in ast.walk(self.tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            if any(
+                isinstance(target, ast.Name) and target.id == "INSEE_KEY"
+                for target in node.targets
+            ):
+                assignments.append(node.value)
+
+        self.assertEqual(len(assignments), 1)
+        value = assignments[0]
+        self.assertIsInstance(value, ast.Call)
+        self.assertIsInstance(value.func, ast.Name)
+        self.assertEqual(value.func.id, "get_secret")
+        self.assertEqual(len(value.args), 1)
+        self.assertIsInstance(value.args[0], ast.Constant)
+        self.assertEqual(value.args[0].value, "INSEE_API_KEY")
+        self.assertEqual(value.keywords, [])
+        self.assertNotIn("dfc20306-246c-477c-8203-06246c977cba", self.source)
+
     def _displayed_indicators(self):
         indicators = []
         for node in ast.walk(self.tree):
