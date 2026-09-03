@@ -101,6 +101,8 @@ OPENROUTER_KEY = get_secret("OPENROUTER_API_KEY")
 DEFAULT_MODEL = get_secret("OPENROUTER_MODEL", "google/gemini-3.7-flash")
 MAX_TOKENS = 1500          # borne la longueur d'une réponse
 STREAM_TIMEOUT = (10, 180)  # (connexion, lecture entre deux chunks)
+MAX_HISTORY_MESSAGES = 8   # derniers échanges utiles envoyés au modèle
+MAX_HISTORY_CHARS = 4000   # borne simple pour éviter un contexte trop lourd
 # Modèles proposés si le catalogue OpenRouter n'est pas joignable
 FALLBACK_MODELS = [
     "google/gemini-3.7-flash",
@@ -1268,28 +1270,58 @@ def generate_insee_pdf(title, code, type_label, url_insee, indicators, ai_messag
     return pdf.output()
 
 
-def build_llm_messages(prompt, context_data, territory_name, demographics=None):
+def prepare_llm_history(messages):
+    """Filtre et borne l'historique conversationnel transmis au modèle."""
+    if not messages:
+        return []
+
+    usable = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        content = str(message.get("content", "")).strip()
+        if role not in ("user", "assistant") or not content:
+            continue
+        if role == "assistant" and content.startswith("Bonjour !"):
+            continue
+        usable.append({"role": role, "content": content})
+
+    selected = []
+    total_chars = 0
+    for message in reversed(usable[-MAX_HISTORY_MESSAGES:]):
+        content_len = len(message["content"])
+        if selected and total_chars + content_len > MAX_HISTORY_CHARS:
+            break
+        selected.append(message)
+        total_chars += content_len
+
+    return list(reversed(selected))
+
+
+def build_llm_messages(prompt, context_data, territory_name, demographics=None, history=None):
     """Assemble les messages envoyés au modèle (système + contexte territorial)."""
     context_str = "\n".join([f"- {k}: {v}" for k, v in context_data.items()])
     demo_block = format_age_sex_context(demographics) if demographics else ""
 
-    user_content = f"""Tu assistes un utilisateur qui consulte le dossier de la collectivité : {territory_name}.
+    context_content = f"""Tu assistes un utilisateur qui consulte le dossier de la collectivité : {territory_name}.
 
 Voici les données clés (issues des bases officielles INSEE / FILOSOFI) pour ce territoire :
 {context_str}
 """
     if demo_block:
-        user_content += f"\n{demo_block}\n"
+        context_content += f"\n{demo_block}\n"
     else:
-        user_content += ("\nAucune donnée de répartition par âge ou par sexe n'est disponible "
-                         "pour ce territoire : ne l'estime pas, indique-le à l'utilisateur.\n")
+        context_content += ("\nAucune donnée de répartition par âge ou par sexe n'est disponible "
+                            "pour ce territoire : ne l'estime pas, indique-le à l'utilisateur.\n")
 
-    user_content += f"\nL'utilisateur demande : {prompt}\n"
-
-    return [
+    messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_content},
+        {"role": "user", "content": context_content},
     ]
+    messages.extend(prepare_llm_history(history))
+    messages.append({"role": "user", "content": prompt})
+    return messages
 
 
 def _openrouter_request(messages, stream):
@@ -1367,7 +1399,7 @@ def _iter_stream_chunks(response):
                 yield piece
 
 
-def stream_llm(prompt, context_data, territory_name, demographics=None):
+def stream_llm(prompt, context_data, territory_name, demographics=None, history=None):
     """Interroge le LLM via OpenRouter en streaming et rend la réponse au fil de l'eau.
 
     Le streaming évite les abandons du fournisseur amont sur les réponses longues :
@@ -1380,7 +1412,7 @@ def stream_llm(prompt, context_data, territory_name, demographics=None):
                "(ou dans votre fichier .env en local).")
         return
 
-    messages = build_llm_messages(prompt, context_data, territory_name, demographics)
+    messages = build_llm_messages(prompt, context_data, territory_name, demographics, history)
     model = st.session_state.get("llm_model", DEFAULT_MODEL)
 
     for attempt in range(2):
@@ -1419,14 +1451,14 @@ def stream_llm(prompt, context_data, territory_name, demographics=None):
             return
 
 
-def ask_llm(prompt, context_data, territory_name, demographics=None):
+def ask_llm(prompt, context_data, territory_name, demographics=None, history=None):
     """Version non streamée (repli) : renvoie la réponse complète en une fois."""
     if not OPENROUTER_KEY:
         return ("Erreur : clé API OpenRouter non configurée. "
                 "Ajoutez `OPENROUTER_API_KEY` dans les secrets Streamlit "
                 "(ou dans votre fichier .env en local).")
 
-    messages = build_llm_messages(prompt, context_data, territory_name, demographics)
+    messages = build_llm_messages(prompt, context_data, territory_name, demographics, history)
     try:
         r = _openrouter_request(messages, stream=False)
         if r.status_code != 200:
@@ -1511,6 +1543,12 @@ with st.sidebar.expander("🤖 Modèle IA (OpenRouter)", expanded=not OPENROUTER
 
     st.session_state["llm_model"] = custom or selected
     st.slider("Température", 0.0, 1.0, 0.3, 0.1, key="llm_temperature")
+    st.checkbox(
+        "Inclure les derniers échanges",
+        value=False,
+        key="llm_include_history",
+        help="Envoie jusqu'à 8 messages précédents à OpenRouter pour mieux gérer les questions de suivi.",
+    )
     st.caption(f"Modèle actif : `{st.session_state['llm_model']}`")
 
 label_type = st.sidebar.selectbox("Type", list(type_mapping.keys()))
@@ -1704,6 +1742,11 @@ if data:
                                     st.markdown(message["content"])
 
                         if prompt := st.chat_input(f"Question sur {row['TITLE']}"):
+                            history = (
+                                list(st.session_state.messages)
+                                if st.session_state.get("llm_include_history")
+                                else None
+                            )
                             st.session_state.messages.append({"role": "user", "content": prompt})
                             with chat_area:
                                 with st.chat_message("user"):
@@ -1713,7 +1756,10 @@ if data:
                                         demographics = get_age_sex_structure(row['CODE'], type_col)
                                     # Streaming : la réponse s'affiche au fil de l'eau
                                     response = st.write_stream(
-                                        stream_llm(prompt, indicators, row['TITLE'], demographics)
+                                        stream_llm(
+                                            prompt, indicators, row['TITLE'], demographics,
+                                            history=history
+                                        )
                                     )
                             st.session_state.messages.append({"role": "assistant", "content": response})
 
