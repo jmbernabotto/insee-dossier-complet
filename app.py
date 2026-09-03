@@ -1753,7 +1753,7 @@ if data:
                     
                     # Configuration des indicateurs hiérarchisés
                     INDICATORS_CONFIG = {
-                        "Recensement de la population 2022 (Iris)": [
+                        "Recensement de la population (communes)": [
                             "Densité de population (hab/km²)",
                             "Indice de jeunesse",
                             "Part de la population étrangère (%)",
@@ -1766,7 +1766,7 @@ if data:
                             "Part des hommes actifs de 15 à 64 ans (%)",
                             "Part des femmes actives de 15 à 64 ans (%)"
                         ],
-                        "Filosofi 2021 (carreau 200m et 1km)": [
+                        "Filosofi 2021 (communes)": [
                             "Niveau de vie des individus (€)",
                             "Nombre d'individus au sens fiscal",
                             "Part des logements sociaux (%)",
@@ -1776,7 +1776,7 @@ if data:
                             "Part des ménages de 5 personnes ou plus (%)",
                             "Surface moyenne des logements (m²)"
                         ],
-                        "Recensement de la population 2021 (carreau 1km)": [
+                        "Population municipale et origine (communes)": [
                             "Population municipale",
                             "Population municipale (femme)",
                             "Population municipale (homme)",
