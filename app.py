@@ -1759,29 +1759,21 @@ if data:
                             "Part de la population étrangère (%)",
                             "Part des résidences principales (%)",
                             "Part des appartements parmi les résidences principales (%)",
-                            "Part des ménages ayant emménagé depuis moins de 2 ans (%)",
-                            "Part des 15 ans ou plus non scolarisés étant diplômés du supérieur (%)",
-                            "Part des 15 ans ou plus non scolarisés sans diplôme ou avec au plus le CEP (%)",
                             "Part des familles monoparentales (%)",
                             "Part des couples avec enfants (%)",
                             "Part des actifs occupés de 15 ans ou plus utilisant la marche ou le vélo (%)",
                             "Part des actifs occupés de 15 ans ou plus utilisant les transports en commun (%)",
                             "Part des hommes actifs de 15 à 64 ans (%)",
-                            "Part des femmes actives de 15 à 64 ans (%)",
-                            "Part des hommes salariés de 15 ans ou plus à temps partiel (%)",
-                            "Part des femmes salariées de 15 ans ou plus à temps partiel (%)"
+                            "Part des femmes actives de 15 à 64 ans (%)"
                         ],
                         "Filosofi 2021 (carreau 200m et 1km)": [
                             "Niveau de vie des individus (€)",
                             "Nombre d'individus au sens fiscal",
-                            "Part des familles monoparentales (%) (Filo)",
                             "Part des logements sociaux (%)",
                             "Part des ménages pauvres (%)",
                             "Part des ménages propriétaires (%)",
                             "Part des ménages d'une seule personne (%)",
                             "Part des ménages de 5 personnes ou plus (%)",
-                            "Part des personnes âgées de moins de 18 ans (%)",
-                            "Part des personnes âgées de 65 ans ou plus (%)",
                             "Surface moyenne des logements (m²)"
                         ],
                         "Recensement de la population 2021 (carreau 1km)": [
@@ -1790,11 +1782,7 @@ if data:
                             "Population municipale (homme)",
                             "Part de la population âgée de moins de 15 ans (%)",
                             "Part de la population âgée de 65 ans ou plus (%)",
-                            "Part de la population née en France (%)",
-                            "Part de la population née dans un pays de l'UE autre que la France (%)",
-                            "Part de la population née dans un pays hors de l'UE (%)",
-                            "Part de la population résidant un an auparavant ailleurs en France (%)",
-                            "Part de la population résidant un an auparavant à l'extérieur de la France (%)"
+                            "Part de la population née en France (%)"
                         ]
                     }
                     
