@@ -21,6 +21,14 @@ OPENROUTER_MODEL   = "google/gemini-3.7-flash"  # optionnel : modèle par défau
 Les variables d'environnement (fichier `.env`) sont acceptées en repli si aucun secret
 Streamlit n'est défini.
 
+### Vérification locale
+
+Les contrôles statiques du projet se lancent sans dépendance externe :
+
+```bash
+python -m unittest discover -s tests
+```
+
 ### Choix du modèle
 
 Dans la barre latérale, l'expander **🤖 Modèle IA (OpenRouter)** permet de :
