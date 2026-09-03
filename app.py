@@ -1543,12 +1543,6 @@ with st.sidebar.expander("🤖 Modèle IA (OpenRouter)", expanded=not OPENROUTER
 
     st.session_state["llm_model"] = custom or selected
     st.slider("Température", 0.0, 1.0, 0.3, 0.1, key="llm_temperature")
-    st.checkbox(
-        "Inclure les derniers échanges",
-        value=False,
-        key="llm_include_history",
-        help="Envoie jusqu'à 8 messages précédents à OpenRouter pour mieux gérer les questions de suivi.",
-    )
     st.caption(f"Modèle actif : `{st.session_state['llm_model']}`")
 
 label_type = st.sidebar.selectbox("Type", list(type_mapping.keys()))
@@ -1728,6 +1722,12 @@ if data:
                     with st.container(border=True):
                         st.markdown("#### 💬 Assistant IA Expert")
                         st.caption("Analysez les données avec l'IA")
+                        st.checkbox(
+                            "Inclure les derniers échanges",
+                            value=False,
+                            key="llm_include_history",
+                            help="Envoie jusqu'à 8 messages précédents à OpenRouter pour mieux gérer les questions de suivi.",
+                        )
                         
                         if "messages" not in st.session_state or not st.session_state.messages:
                             st.session_state.messages = [
