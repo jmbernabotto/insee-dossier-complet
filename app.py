@@ -1583,7 +1583,10 @@ if data:
         # Normalisation de la saisie utilisateur
         search_norm = unidecode(search).lower().replace('-', ' ')
         
-        mask = df['SEARCH_KEY'].str.contains(search_norm, na=False) | df['CODE'].str.contains(search, na=False)
+        mask = (
+            df['SEARCH_KEY'].str.contains(search_norm, na=False, regex=False) |
+            df['CODE'].str.contains(search, na=False, regex=False)
+        )
         res = df[mask].copy()
         
         if not res.empty:
