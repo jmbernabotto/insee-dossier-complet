@@ -26,7 +26,7 @@ Streamlit n'est défini.
 Les contrôles statiques du projet se lancent sans dépendance externe :
 
 ```bash
-python -m unittest discover -s tests
+npm test
 ```
 
 ### Choix du modèle
