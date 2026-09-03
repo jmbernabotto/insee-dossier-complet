@@ -25,6 +25,7 @@ const findCollectivite = async () => {
   try {
     const apiClient = axios.create({
       baseURL: API_BASE_URL,
+      timeout: 15000,
       headers: {
         'Authorization': `Bearer ${API_KEY}`, // Utilisation du jeton direct
         'Accept': 'application/json'

@@ -170,7 +170,7 @@ def list_openrouter_models():
 def load_insee(endpt):
     h = {"Authorization": f"Bearer {INSEE_KEY}", "Accept": "application/json"}
     try:
-        r = requests.get(f"https://api.insee.fr/metadonnees/geo/{endpt}", headers=h)
+        r = requests.get(f"https://api.insee.fr/metadonnees/geo/{endpt}", headers=h, timeout=15)
         if r.status_code == 200:
             return r.json()
         else:
@@ -488,7 +488,7 @@ def get_territory_indicators(code, kind):
             if kind == "communes":
                 fields += ",codesPostaux,codeDepartement,codeRegion"
             
-            r = requests.get(f"https://geo.api.gouv.fr/{api_kind}/{code}?fields={fields}")
+            r = requests.get(f"https://geo.api.gouv.fr/{api_kind}/{code}?fields={fields}", timeout=10)
             if r.status_code == 200:
                 data = r.json()
                 # On ne remplace la population que si on ne l'a pas déjà eue via pynsee
